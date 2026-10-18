@@ -9,6 +9,9 @@ import { createSim, FootySim, Side, NO_KEYS } from "../footy/sim";
 // second (footy/sim.ts), and every frame goes to both players. The pages
 // only send which keys are down — neither browser decides a goal or a result.
 const FRAME_MS = 1000 / 30;
+// Local tests only: delay every key message and every frame by this much, to feel a slow connection.
+const TEST_LAG_MS = Number(process.env.FOOTY_TEST_LAG_MS) || 0;
+const later = (fn: () => void) => (TEST_LAG_MS ? setTimeout(fn, TEST_LAG_MS) : fn());
 
 // ── Account-owned seats (same model as Pong's GameRoom / FIFA's FifaRoom) ────
 // A match seat belongs to the account: the same account on a new connection
@@ -158,7 +161,8 @@ export class GameRoom extends Room {
       if (idx === -1) return;
       this.touch(this.gameJoined[idx]);
       if (!this.sim || this.finalResult) return;
-      this.sim.setKeys(SIDE_OF(idx), { left: !!data?.l, right: !!data?.r, jump: !!data?.u, kick: !!data?.k });
+      const keys = { left: !!data?.l, right: !!data?.r, jump: !!data?.u, kick: !!data?.k };
+      later(() => { if (this.sim && !this.finalResult) this.sim.setKeys(SIDE_OF(idx), keys); });
     });
 
     // Quitting a live match is an instant loss (same rule as every 1v1 game).
@@ -193,7 +197,8 @@ export class GameRoom extends Room {
     });
 
     this.onMessage("ping", (client: Client, data: { ts: number }) => {
-      client.send("pong", { ts: data?.ts });
+      const ts = data?.ts;
+      later(() => later(() => client.send("pong", { ts })));   // test lag both ways, like the key messages and frames
     });
   }
 
@@ -346,7 +351,7 @@ export class GameRoom extends Room {
       let n = 0;
       while (Date.now() >= next && n < 5) {
         sim.tick();
-        this.broadcast('s', sim.snapshot());
+        { const snap = sim.snapshot(); later(() => this.broadcast('s', snap)); }
         next += FRAME_MS; n++;
         if (sim.result) {
           const r = sim.result;
@@ -355,7 +360,7 @@ export class GameRoom extends Room {
         }
       }
       if (Date.now() - next > 1000) next = Date.now();   // the process was stalled: don't fast-forward the match
-    }, 8);
+    }, 4);
   }
 
   private stopLoop() {

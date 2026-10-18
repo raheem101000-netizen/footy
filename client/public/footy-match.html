@@ -191,7 +191,9 @@ function setConn() {
 // so movement stays smooth over an uneven connection.
 const snaps = [];
 let renderF = null;
-const DELAY_FRAMES = 2.2;
+// How far behind the newest frame the ball and the opponent are drawn: just enough to cover
+// this connection's unevenness (measured), so it's as small as the connection allows.
+let delayF = 1.4, lastArrive = 0, jitter = 6;
 const effects = [];          // one-shot effects, animated here
 let lastTx = 0, txT = 999, lastGw = 0, gwT = 0;
 const trail = [];
@@ -202,6 +204,9 @@ function onSnap(s) {
   if (snaps.length > 90) snaps.splice(0, snaps.length - 90);
   // sounds and effects as they happen (skipped when a burst of late frames arrives together)
   s.at = performance.now();
+  if (lastArrive) { const gap = s.at - lastArrive; jitter += (Math.abs(gap - 1000 / 30) - jitter) * .05; }
+  lastArrive = s.at;
+  delayF = Math.max(1.1, Math.min(3, 1 + jitter * 1.6 / (1000 / 30)));
   for (const n of s.snd) playSound(n);
   for (const e of s.fx) effects.push({ k: e[0], x: e[1], y: e[2], xs: e[3] || 0, ys: e[4] || 0, t: 0 });
   if (s.tx && s.tx.seq !== lastTx) { lastTx = s.tx.seq; txT = 0; }
@@ -223,6 +228,8 @@ function connect() {
   socket.on('presence', ({ p1Away, p2Away }) => { oppAway = mySide === 'L' ? !!p2Away : !!p1Away; setConn(); });
   socket.on('kickoff', () => { snaps.length = 0; renderF = null; effects.length = 0; trail.length = 0; hide('result'); });
   socket.on('s', onSnap);
+  socket.on('pong', (d) => { if (d && d.ts) { const ms = performance.now() - d.ts; if (ms > 0 && ms < 2000) rtt += (ms - rtt) * .3; } });
+  setInterval(() => { if (socket && socket.connected) socket.emit('ping', { ts: performance.now() }); }, 1000);
   socket.on('superseded', ({ message }) => {
     matchOver = true; setConn();
     showResult('OPENED ELSEWHERE', '#FFB400', message || 'You opened this match somewhere else.');
@@ -508,6 +515,64 @@ function updateSplash(v) {
   document.getElementById('sp-ko').textContent = 'KICK-OFF IN ' + (v.cnt < 30 ? 3 : v.cnt < 60 ? 2 : 1);
 }
 
+/* ---------------- your own ape, moved on this screen straight away ---------------- */
+// Like your paddle in Pong: your ape reacts the moment you press a key, using the same movement
+// rules the server uses (footy/sim.ts). The server still decides everything; where it had you is
+// compared with where this screen had you one round trip earlier, and any difference is eased in
+// (or snapped, if it's big — a bump into the other player, a kick-off reset).
+let rtt = 80;                                   // ms, measured with ping
+const pred = { on: false, x: 0, y: 0, xs: 0, vy: 0, ba: 0, hist: [], snapF: -1 };
+let predAcc = 0;
+const BOOT = { R: { rest: -1.98, kick: 0.02, off: 3.09 }, L: { rest: 1.85, kick: -0.19, off: 0.05 } };
+const wrapA = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+function myNewest() { const S = snaps.length ? snaps[snaps.length - 1] : null; return S && S.w ? S : null; }
+function predReset(P) { pred.on = true; pred.x = P[0]; pred.y = P[1]; pred.xs = P[13] || 0; pred.vy = P[14] || 0; pred.ba = P[5]; pred.hist.length = 0; }
+function predStep(P, k) {                       // one game frame (1/30 s), same rules as the server
+  const sc = P[6], frozen = !!P[9], bombed = !!P[10], spd = P[11], jmp = P[12], r = 20 * sc, R = mySide === 'R';
+  if (k.l && !frozen && !bombed && (R || pred.x > 80)) pred.xs -= 50 + spd * 30;
+  if (k.r && !frozen && !bombed && (!R || pred.x < 720)) pred.xs += 50 + spd * 30;
+  if (k.u && !bombed && pred.y + 25 * sc > 459) pred.vy = -150 - jmp * 50;
+  pred.xs *= .7; pred.vy += 5;
+  for (let i = 0; i < 3; i++) {
+    pred.vy += 300 / 96; pred.x += pred.xs / 96; pred.y += pred.vy / 96;
+    if (pred.y > 460 - r) { pred.y = 460 - r; if (pred.vy > 0) pred.vy = 0; }
+    pred.x = Math.max(5 + r, Math.min(795 - r, pred.x));
+  }
+  // the boot swings out while kick is held and back when it's let go, like the server's motor
+  const B = BOOT[mySide], kicking = k.k && !P[8] && !bombed;
+  if (!bombed) { const tgt = kicking ? B.kick : B.rest; pred.ba = wrapA(pred.ba + wrapA(tgt - pred.ba) * (kicking ? .38 : .22)); }
+}
+function predTick(dt, now) {
+  const S = myNewest(), P = S && S[mySide];
+  // only while play is running (not during a countdown, or once the match is over)
+  if (!P || S.cnt >= 2 || matchOver || (S.gw && S.gw.win)) { pred.on = false; predAcc = 0; return; }
+  if (!pred.on) predReset(P);
+  predAcc += dt;
+  while (predAcc >= 1000 / 30) { predAcc -= 1000 / 30; predStep(P, keysNow()); pred.hist.push({ t: now, x: pred.x, y: pred.y }); }
+  while (pred.hist.length > 90) pred.hist.shift();
+  // a new server frame: compare it with where we had ourselves one round trip ago
+  if (S.f !== pred.snapF) {
+    pred.snapF = S.f;
+    const want = now - rtt - 1000 / 60;
+    let h = null; for (const e of pred.hist) { if (e.t <= want) h = e; else break; }
+    if (!h) h = pred.hist[0];
+    if (h) {
+      const ex = P[0] - h.x, ey = P[1] - h.y;
+      if (Math.hypot(ex, ey) > 60) predReset(P);                         // way off: take the server's
+      else { const k = .25; pred.x += ex * k; pred.y += ey * k; for (const e of pred.hist) if (e.t >= h.t) { e.x += ex * k; e.y += ey * k; } }
+      if (pred.y >= 460 - 20 * P[6] - .5 && Math.abs(P[14] || 0) < 1 && Math.abs(ey) > 3) pred.y = P[1];   // landed on the server: land here too
+    }
+  }
+}
+// My player as drawn: the server's array with the head and boot moved to this screen's prediction.
+function myDrawn(Pv) {
+  if (!pred.on || !Pv) return Pv;
+  const out = Pv.slice(), sc = Pv[6], phi = pred.ba + BOOT[mySide].off;
+  out[0] = pred.x; out[1] = pred.y;
+  out[3] = pred.x + Math.cos(phi) * 16.1 * Pv[7]; out[4] = pred.y + Math.sin(phi) * 16.1 * Pv[7]; out[5] = pred.ba;
+  return out;
+}
+
 /* ---------------- interpolation between server frames ---------------- */
 const lerp = (a, b, t) => a + (b - a) * t;
 const lerpA = (a, b, t) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return a + d * t; };
@@ -535,13 +600,14 @@ let lastT = performance.now(), fxAcc = 0;
 function frame(now) {
   const dt = Math.min(250, now - lastT); lastT = now;
   const newest = snaps.length ? snaps[snaps.length - 1].f : 0;
-  if (renderF === null && snaps.length) renderF = newest - DELAY_FRAMES;
+  if (renderF === null && snaps.length) renderF = newest - delayF;
   if (renderF !== null) {
     renderF += dt * 30 / 1000;
-    const target = newest - DELAY_FRAMES;
+    const target = newest - delayF;
     if (Math.abs(target - renderF) > 15) renderF = target;           // far off (tab was hidden): jump
     else renderF += (target - renderF) * Math.min(1, dt / 400);      // drift gently toward the target
   }
+  predTick(dt, now);
   // effects advance at the game's 30 frames a second
   fxAcc += dt * 30 / 1000;
   while (fxAcc >= 1) { fxAcc -= 1; stepEffects(); }
@@ -577,8 +643,8 @@ function draw(v) {
       ctx.fillStyle = '#5a3a1e'; ctx.fillRect(sp.x - 18, sp.y - 20, 36, 8); ctx.fillStyle = '#111'; ctx.fillRect(sp.x - 8, sp.y - 4, 4, 4); ctx.fillRect(sp.x + 4, sp.y - 4, 4, 4);
       ctx.fillStyle = '#c0392b'; ctx.fillRect(sp.x - 7, sp.y + 8, 14, 3); }
     // the opponent behind, you in front
-    if (mySide === 'R') { drawPlayer(v.L, false, false, v.f); drawPlayer(v.R, true, true, v.f); }
-    else { drawPlayer(v.R, true, false, v.f); drawPlayer(v.L, false, true, v.f); }
+    if (mySide === 'R') { drawPlayer(v.L, false, false, v.f); drawPlayer(myDrawn(v.R), true, true, v.f); }
+    else { drawPlayer(v.R, true, false, v.f); drawPlayer(myDrawn(v.L), false, true, v.f); }
     drawBallAt(bp[0], bp[1], bp[3], bp[2], bp[4]);
     drawGoal(0, v.g[0]); drawGoal(1, v.g[1]);
     for (const e of effects) {
@@ -630,7 +696,7 @@ function draw(v) {
 
 connect();
 requestAnimationFrame(t => { lastT = t; frame(t); });
-window.__footy = { snaps, get side() { return mySide; }, keysNow };   // test hook
+window.__footy = { snaps, pred, get rtt() { return rtt; }, get delayF() { return delayF; }, get side() { return mySide; }, keysNow };   // test hook
 })();
 </script>
 </body>
