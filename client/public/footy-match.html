@@ -398,8 +398,10 @@ function drawBoot(p, ang, isHero, sc, broken, kit) {
   ctx.restore();
 }
 // P = [x, y, a, bx, by, ba, headScale, bootScale, broken, frozen, bombed, speed, jump]
+// Colours belong to the player, not the screen: the left-side player is red and the
+// right-side player is blue on BOTH players' screens (the left player's view is mirrored).
 function drawPlayer(Pv, isHero, isMe, timer) {
-  const col = isMe ? 'blue' : 'red', kit = SHIRTS[col][0], sc = Pv[6];
+  const col = isHero ? 'blue' : 'red', kit = SHIRTS[col][0], sc = Pv[6];
   drawBoot([Pv[3], Pv[4]], Pv[5], isHero, Pv[7], !!Pv[8], kit);
   drawHeadAt(Pv[0], Pv[1], sc, isHero, col);
   const p = { x: Pv[0], y: Pv[1] }, frozen = !!Pv[9], bombed = !!Pv[10], spd = Pv[11], r = 20 * sc;
@@ -521,15 +523,15 @@ function draw(v) {
     for (const b of v.bm) { ctx.fillStyle = '#1b1b1b'; ctx.beginPath(); ctx.arc(b[0], b[1], 11, 0, 7); ctx.fill(); ctx.fillStyle = '#ff7a1a'; ctx.fillRect(b[0] - 1, b[1] - 19, 3, 7); ctx.fillStyle = '#ffe14a'; ctx.fillRect(b[0] - 1, b[1] - 21, 3, 3); }
   } else {
     // waiting for kick-off: both apes on their spots
-    if (mySide === 'R') { drawHeadAt(200, 440, 1, false, 'red'); drawHeadAt(600, 440, 1, true, 'blue'); }
-    else { drawHeadAt(600, 440, 1, true, 'red'); drawHeadAt(200, 440, 1, false, 'blue'); }
+    drawHeadAt(200, 440, 1, false, 'red'); drawHeadAt(600, 440, 1, true, 'blue');
     drawGoal(0, v ? v.g[0] : 1); drawGoal(1, v ? v.g[1] : 1);
   }
   ctx.restore();
 
   // ---- scoreboard and words (never mirrored) ----
   const myScore = v ? (mySide === 'L' ? v.sl : v.sr) : 0, theirScore = v ? (mySide === 'L' ? v.sr : v.sl) : 0;
-  txt(oppName, 14, 22, 22, '#ff3b2f', 'left'); txt(myName, 786, 22, 22, '#5aa2ff', 'right');
+  const myCol = mySide === 'R' ? '#5aa2ff' : '#ff3b2f', oppCol = mySide === 'R' ? '#ff3b2f' : '#5aa2ff';
+  txt(oppName, 14, 22, 22, oppCol, 'left'); txt(myName, 786, 22, 22, myCol, 'right');
   txt(String(theirScore), 20, 82, 44, '#ffffff', 'left'); txt(String(myScore), 780, 82, 44, '#ffffff', 'right');
   const flash = v && v.fl < 18 && (v.fl < 6 || v.fl > 12);
   if (v && v.w) {
