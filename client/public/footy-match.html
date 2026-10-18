@@ -174,6 +174,7 @@ addEventListener('pointerdown', audioOn); addEventListener('keydown', audioOn);
    NETWORK — the server runs the match; this page sends keys and draws
    ================================================================ */
 const auth = window.footyAuth();
+const PREDICT = !/[?&]pred=0/.test(location.search);   // ?pred=0: draw your ape straight from the server (for comparing)
 const roomFromURL = new URLSearchParams(location.search).get('room');
 if (!auth || !roomFromURL) location.replace('/rooms.html');
 const browserId = (() => { try { let id = localStorage.getItem('footy_bid'); if (!id) { id = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10); localStorage.setItem('footy_bid', id); } return id; } catch (e) { return null; } })();
@@ -204,7 +205,7 @@ function onSnap(s) {
   if (snaps.length > 90) snaps.splice(0, snaps.length - 90);
   // sounds and effects as they happen (skipped when a burst of late frames arrives together)
   s.at = performance.now();
-  if (lastArrive) { const gap = s.at - lastArrive; jitter += (Math.abs(gap - 1000 / 30) - jitter) * .05; }
+  if (lastArrive) { const gap = s.at - lastArrive; jitter += (Math.abs(gap - 1000 / 30) - jitter) * .05; netStat.gaps.push([s.at, gap]); }
   lastArrive = s.at;
   delayF = Math.max(1.1, Math.min(3, 1 + jitter * 1.6 / (1000 / 30)));
   for (const n of s.snd) playSound(n);
@@ -521,12 +522,15 @@ function updateSplash(v) {
 // compared with where this screen had you one round trip earlier, and any difference is eased in
 // (or snapped, if it's big — a bump into the other player, a kick-off reset).
 let rtt = 80;                                   // ms, measured with ping
-const pred = { on: false, x: 0, y: 0, xs: 0, vy: 0, ba: 0, hist: [], snapF: -1 };
+const netStat = { corr: [], gaps: [], show: /[?&]net=1/.test(location.search) };
+addEventListener('keydown', e => { if (e.code === 'KeyN') netStat.show = !netStat.show; });
+const pred = { on: false, x: 0, y: 0, xs: 0, vy: 0, ba: 0, hist: [], snapF: -1, px: 0, py: 0, pba: 0, ox: 0, oy: 0 };
+// px/py/pba: the previous step (drawn in between the two, so it glides at any screen rate); ox/oy: a correction still fading in
 let predAcc = 0;
 const BOOT = { R: { rest: -1.98, kick: 0.02, off: 3.09 }, L: { rest: 1.85, kick: -0.19, off: 0.05 } };
 const wrapA = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
 function myNewest() { const S = snaps.length ? snaps[snaps.length - 1] : null; return S && S.w ? S : null; }
-function predReset(P) { pred.on = true; pred.x = P[0]; pred.y = P[1]; pred.xs = P[13] || 0; pred.vy = P[14] || 0; pred.ba = P[5]; pred.hist.length = 0; }
+function predReset(P) { pred.on = true; pred.x = pred.px = P[0]; pred.y = pred.py = P[1]; pred.xs = P[13] || 0; pred.vy = P[14] || 0; pred.ba = pred.pba = P[5]; pred.ox = pred.oy = 0; pred.hist.length = 0; }
 function predStep(P, k) {                       // one game frame (1/30 s), same rules as the server
   const sc = P[6], frozen = !!P[9], bombed = !!P[10], spd = P[11], jmp = P[12], r = 20 * sc, R = mySide === 'R';
   if (k.l && !frozen && !bombed && (R || pred.x > 80)) pred.xs -= 50 + spd * 30;
@@ -545,10 +549,11 @@ function predStep(P, k) {                       // one game frame (1/30 s), same
 function predTick(dt, now) {
   const S = myNewest(), P = S && S[mySide];
   // only while play is running (not during a countdown, or once the match is over)
-  if (!P || S.cnt >= 2 || matchOver || (S.gw && S.gw.win)) { pred.on = false; predAcc = 0; return; }
+  if (!PREDICT || !P || S.cnt >= 2 || matchOver || (S.gw && S.gw.win)) { pred.on = false; predAcc = 0; return; }
   if (!pred.on) predReset(P);
   predAcc += dt;
-  while (predAcc >= 1000 / 30) { predAcc -= 1000 / 30; predStep(P, keysNow()); pred.hist.push({ t: now, x: pred.x, y: pred.y }); }
+  while (predAcc >= 1000 / 30) { predAcc -= 1000 / 30; pred.px = pred.x; pred.py = pred.y; pred.pba = pred.ba; predStep(P, keysNow()); pred.hist.push({ t: now, x: pred.x, y: pred.y }); }
+  const fade = Math.exp(-dt / 110); pred.ox *= fade; pred.oy *= fade;   // corrections fade in over ~0.1 s
   while (pred.hist.length > 90) pred.hist.shift();
   // a new server frame: compare it with where we had ourselves one round trip ago
   if (S.f !== pred.snapF) {
@@ -559,7 +564,11 @@ function predTick(dt, now) {
     if (h) {
       const ex = P[0] - h.x, ey = P[1] - h.y;
       if (Math.hypot(ex, ey) > 60) predReset(P);                         // way off: take the server's
-      else { const k = .25; pred.x += ex * k; pred.y += ey * k; for (const e of pred.hist) if (e.t >= h.t) { e.x += ex * k; e.y += ey * k; } }
+      else if (Math.hypot(ex, ey) > 1) {                                 // move the game state at once, but let the picture glide there
+        pred.x += ex; pred.y += ey; pred.px += ex; pred.py += ey; pred.ox -= ex; pred.oy -= ey;
+        for (const e of pred.hist) if (e.t >= h.t) { e.x += ex; e.y += ey; }
+        netStat.corr.push([now, Math.hypot(ex, ey)]);
+      }
       if (pred.y >= 460 - 20 * P[6] - .5 && Math.abs(P[14] || 0) < 1 && Math.abs(ey) > 3) pred.y = P[1];   // landed on the server: land here too
     }
   }
@@ -567,9 +576,12 @@ function predTick(dt, now) {
 // My player as drawn: the server's array with the head and boot moved to this screen's prediction.
 function myDrawn(Pv) {
   if (!pred.on || !Pv) return Pv;
-  const out = Pv.slice(), sc = Pv[6], phi = pred.ba + BOOT[mySide].off;
-  out[0] = pred.x; out[1] = pred.y;
-  out[3] = pred.x + Math.cos(phi) * 16.1 * Pv[7]; out[4] = pred.y + Math.sin(phi) * 16.1 * Pv[7]; out[5] = pred.ba;
+  const a = Math.min(1, predAcc / (1000 / 30));                      // between the last two steps
+  const x = pred.px + (pred.x - pred.px) * a + pred.ox, y = pred.py + (pred.y - pred.py) * a + pred.oy;
+  const ba = pred.pba + wrapA(pred.ba - pred.pba) * a;
+  const out = Pv.slice(), phi = ba + BOOT[mySide].off;
+  out[0] = x; out[1] = y; window.__drawnX = x;
+  out[3] = x + Math.cos(phi) * 16.1 * Pv[7]; out[4] = y + Math.sin(phi) * 16.1 * Pv[7]; out[5] = ba;
   return out;
 }
 
@@ -642,6 +654,7 @@ function draw(v) {
     if (v.st) { const sp = { x: v.st[0], y: v.st[1] }; ctx.fillStyle = '#f1c7a1'; ctx.beginPath(); ctx.arc(sp.x, sp.y, 20, 0, 7); ctx.fill();
       ctx.fillStyle = '#5a3a1e'; ctx.fillRect(sp.x - 18, sp.y - 20, 36, 8); ctx.fillStyle = '#111'; ctx.fillRect(sp.x - 8, sp.y - 4, 4, 4); ctx.fillRect(sp.x + 4, sp.y - 4, 4, 4);
       ctx.fillStyle = '#c0392b'; ctx.fillRect(sp.x - 7, sp.y + 8, 14, 3); }
+    window.__oppX = (mySide === 'R' ? v.L : v.R)[0]; window.__ballX = v.b[0];
     // the opponent behind, you in front
     if (mySide === 'R') { drawPlayer(v.L, false, false, v.f); drawPlayer(myDrawn(v.R), true, true, v.f); }
     else { drawPlayer(v.R, true, false, v.f); drawPlayer(myDrawn(v.L), false, true, v.f); }
@@ -680,6 +693,15 @@ function draw(v) {
   ctx.save(); ctx.beginPath(); ctx.rect(298, 485, 270, 51); ctx.clip(); txt('FOOTY', 433, 511, 34, '#ffcf3a', 'center'); ctx.restore();
   drawSpeaker(744, 499, AU.music, true); drawSpeaker(772, 499, AU.sfx, false);
   updateSplash(v);
+  if (netStat.show) {   // connection readout (press N): what the connection is doing right now
+    const now = performance.now(), keep = a => { while (a.length && a[0][0] < now - 3000) a.shift(); return a; };
+    const gaps = keep(netStat.gaps).map(g => g[1]), corr = keep(netStat.corr).map(c => c[1]);
+    const late = gaps.filter(g => g > 60).length, maxGap = gaps.length ? Math.max(...gaps) : 0;
+    const lines = ['ping ' + Math.round(rtt) + ' ms', 'frames ' + Math.round(gaps.length / 3) + '/s  late ' + late + '  worst gap ' + Math.round(maxGap) + ' ms',
+      'smoothing ' + Math.round(delayF * 1000 / 30) + ' ms', 'corrections ' + corr.length + '  biggest ' + (corr.length ? Math.max(...corr).toFixed(1) : 0) + ' px'];
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(8, 112, 230, 78);
+    lines.forEach((l, i) => uiTxt(l, 16, 126 + i * 18, 16, '#d4ff8a', 'left'));
+  }
   if (!v) { txt(joined ? 'Waiting for ' + oppName + '…' : 'Connecting…', 400, 240, 40, '#ffffff', 'center', 7); return; }
   if (matchOver) return;   // the result screen is up: no game words behind it
   const over = v.gw && v.gw.win;
