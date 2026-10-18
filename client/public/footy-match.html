@@ -27,16 +27,16 @@ body{background:var(--night);color:var(--chalk);font-family:var(--ui);overflow:h
 #conn{position:absolute;left:50%;top:150px;transform:translateX(-50%);display:none;padding:7px 14px;border-radius:8px;font:700 15px var(--ui);letter-spacing:.04em;
   background:rgba(20,16,0,.75);border:1px solid rgba(255,180,0,.6);color:#FFB400;white-space:nowrap;pointer-events:none;z-index:6}
 /* end of match (same flow as Pong's) */
-#result,#confirm{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(6,16,9,.86);z-index:10;text-align:center;gap:6px}
+#result,#confirm{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse 70% 55% at 50% 0%,rgba(212,175,55,.16),transparent 70%),rgba(12,11,8,.9);z-index:10;text-align:center;gap:6px}
 #r-title{font:64px var(--display);text-shadow:0 4px 0 #0c2a14}
 #r-score{font:800 34px var(--ui);color:#fff;margin-bottom:6px}
 #r-credit{display:none;font:700 18px 'Space Grotesk',sans-serif;color:#4CFF6C;margin:2px 0 12px;max-width:560px}
 .btn{font:800 22px var(--ui);letter-spacing:.03em;border:0;border-radius:9px;padding:9px 30px;cursor:pointer;margin:4px}
 .btn.green{background:#4CFF6C;color:#0d2a12}
-.btn.purple{background:#b450ff;color:#fff}
+.btn.purple{background:#d4af37;color:#1a1405}
 .btn.ghost{background:rgba(255,255,255,.08);color:rgba(255,255,255,.8);border:1px solid rgba(255,255,255,.25)}
 .btn[disabled]{opacity:.55;cursor:default}
-.back{display:inline-block;margin-top:10px;font:13px 'Space Grotesk',sans-serif;letter-spacing:1px;color:rgba(255,255,255,.6);text-decoration:none;border:1px solid rgba(255,255,255,.2);border-radius:6px;padding:8px 18px}
+.back{display:inline-block;margin-top:10px;font:13px 'Space Grotesk',sans-serif;letter-spacing:1px;color:rgba(255,255,255,.6);text-decoration:none;border:1px solid rgba(212,175,55,.35);border-radius:6px;padding:8px 18px}
 #c-msg{font:800 26px var(--ui);max-width:520px;line-height:1.2;margin-bottom:10px}
 /* touch controls (phones / tablets) */
 #pad{position:absolute;inset:0;pointer-events:none;display:none;z-index:5}
@@ -61,7 +61,7 @@ body{background:var(--night);color:var(--chalk);font-family:var(--ui);overflow:h
   </div>
   <div id="confirm">
     <div id="c-msg">Quit the match? Quitting a live match is an instant loss.</div>
-    <div><button class="btn ghost" id="c-no">Keep playing</button><button class="btn purple" id="c-yes" style="background:#e0332b">Quit and lose</button></div>
+    <div><button class="btn ghost" id="c-no">Keep playing</button><button class="btn purple" id="c-yes" style="background:#e0332b;color:#fff">Quit and lose</button></div>
   </div>
   <div id="result">
     <div id="r-title">YOU WIN!</div>

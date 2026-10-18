@@ -4,22 +4,22 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FOOTY — Rooms</title>
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Lilita+One&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
-html,body{width:100%;min-height:100%;background:#0d0d1a;color:#fff;font-family:'Space Grotesk',sans-serif;}
+html,body{width:100%;min-height:100%;background:#0c0b08;color:#fff;font-family:'Space Grotesk',sans-serif;}
 
 /* NAV */
-.nav{display:flex;align-items:center;justify-content:space-between;padding:14px 32px;border-bottom:1px solid rgba(255,255,255,0.07);background:#080812;}
+.nav{display:flex;align-items:center;justify-content:space-between;padding:14px 32px;border-bottom:1px solid rgba(255,255,255,0.07);background:#000000;}
 .nav-logo{font-size:20px;letter-spacing:8px;font-weight:300;}
 .nav-right{font-size:11px;color:rgba(255,255,255,0.25);letter-spacing:2px;}
 
 /* NAME BAR */
-.name-bar{display:flex;align-items:center;gap:10px;padding:10px 32px;background:#0a0a16;border-bottom:1px solid rgba(255,255,255,0.05);}
+.name-bar{display:flex;align-items:center;gap:10px;padding:10px 32px;background:#0a0907;border-bottom:1px solid rgba(255,255,255,0.05);}
 .name-bar label{font-size:11px;color:rgba(255,255,255,0.3);letter-spacing:1px;}
 .name-input{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#fff;padding:7px 14px;font-size:13px;font-family:'Space Grotesk',sans-serif;border-radius:8px;outline:none;width:180px;}
-.name-input:focus{border-color:rgba(180,80,255,0.5);}
-.btn-purple{background:#b450ff;color:#fff;border:none;padding:8px 18px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;border-radius:8px;cursor:pointer;}
+.name-input:focus{border-color:rgba(212,175,55,0.5);}
+.btn-purple{background:#d4af37;color:#fff;border:none;padding:8px 18px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;border-radius:8px;cursor:pointer;}
 .btn-purple:hover{opacity:0.85;}
 
 /* CONTAINER */
@@ -43,8 +43,8 @@ html,body{width:100%;min-height:100%;background:#0d0d1a;color:#fff;font-family:'
 td.room-name{color:#fff;font-weight:500;}
 td.room-players{font-size:13px;}
 td.room-enter{text-align:right;}
-.room-enter-btn{display:inline-flex;align-items:center;gap:6px;background:rgba(180,80,255,0.15);border:1px solid rgba(180,80,255,0.4);color:#b450ff;padding:7px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Space Grotesk',sans-serif;transition:all 0.15s;}
-.room-enter-btn:hover{background:rgba(180,80,255,0.25);border-color:#b450ff;}
+.room-enter-btn{display:inline-flex;align-items:center;gap:6px;background:rgba(212,175,55,0.15);border:1px solid rgba(212,175,55,0.4);color:#d4af37;padding:7px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Space Grotesk',sans-serif;transition:all 0.15s;}
+.room-enter-btn:hover{background:rgba(212,175,55,0.25);border-color:#d4af37;}
 .room-enter-btn.spectate{background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.15);color:rgba(255,255,255,0.4);}
 #rooms-empty{padding:48px 0;text-align:center;color:rgba(255,255,255,0.2);font-size:14px;line-height:2.2;}
 
@@ -58,12 +58,12 @@ td.room-enter{text-align:right;}
 .room-detail-header h2{font-size:22px;font-weight:600;}
 .room-code-wrap{margin-bottom:16px;}
 .room-code-label{font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:2px;margin-bottom:4px;}
-.room-code-val{font-size:32px;font-weight:700;font-family:monospace;color:#b450ff;letter-spacing:10px;}
+.room-code-val{font-size:32px;font-weight:700;font-family:monospace;color:#d4af37;letter-spacing:10px;}
 
 /* START BTN */
-.btn-start-now{flex:1;background:#b450ff;color:#fff;border:none;padding:12px 20px;font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:700;border-radius:10px;cursor:pointer;display:none;}
-.btn-start-now:not(:disabled){background:#b450ff;}
-.btn-start-now:disabled{background:rgba(180,80,255,0.2);color:rgba(255,255,255,0.3);cursor:not-allowed;}
+.btn-start-now{flex:1;background:#d4af37;color:#fff;border:none;padding:12px 20px;font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:700;border-radius:10px;cursor:pointer;display:none;}
+.btn-start-now:not(:disabled){background:#d4af37;}
+.btn-start-now:disabled{background:rgba(212,175,55,0.2);color:rgba(255,255,255,0.3);cursor:not-allowed;}
 
 /* PLAYERS TABLE */
 .players-count{font-size:14px;color:rgba(255,255,255,0.4);margin-bottom:12px;}
@@ -80,7 +80,7 @@ td.room-enter{text-align:right;}
 .room-notice{font-size:12px;line-height:1.5;color:rgba(255,255,255,0.4);margin:0 0 18px;}
 .kick-btn{background:none;border:1px solid rgba(255,85,85,0.35);color:#ff6b6b;border-radius:6px;width:26px;height:26px;line-height:22px;font-size:12px;cursor:pointer;padding:0;}
 .kick-btn:hover{background:rgba(255,85,85,0.15);}
-.ready-host{background:rgba(180,80,255,0.15);color:#b450ff;}
+.ready-host{background:rgba(212,175,55,0.15);color:#d4af37;}
 .p-empty{color:rgba(255,255,255,0.2);font-style:italic;padding:16px 12px;}
 
 /* CHAT */
@@ -95,13 +95,13 @@ td.room-enter{text-align:right;}
 
 /* ACTIONS */
 .room-actions{display:flex;gap:10px;align-items:center;}
-.rematch-box{display:none;margin:0 0 18px;padding:12px 16px;border-radius:10px;background:rgba(180,80,255,0.1);border:1px solid rgba(180,80,255,0.4);color:#e6ccff;font-size:14px;font-weight:600;}
+.rematch-box{display:none;margin:0 0 18px;padding:12px 16px;border-radius:10px;background:rgba(212,175,55,0.1);border:1px solid rgba(212,175,55,0.4);color:#f5e6b0;font-size:14px;font-weight:600;}
 .pay-box{display:none;margin:0 0 18px;padding:14px 16px;border-radius:10px;background:rgba(255,210,74,0.08);border:1px solid rgba(255,210,74,0.5);color:#FFE7A0;font-size:14px;font-weight:600;line-height:1.45;}
 .pay-box .pay-btn{display:inline-block;margin-top:10px;background:#FFD24A;color:#1a1200;text-decoration:none;padding:10px 20px;font-size:14px;font-weight:700;border-radius:8px;}
 .pay-box .pay-btn:hover{opacity:.9;}
 .pay-box .pay-paid{display:inline-block;margin-top:8px;color:#4CFF6C;}
 .pay-box .pay-sub{margin-top:8px;font-size:12px;font-weight:500;color:rgba(255,231,160,0.7);}
-.rematch-box button{margin-left:12px;background:#b450ff;color:#fff;border:none;padding:8px 18px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;border-radius:8px;cursor:pointer;}
+.rematch-box button{margin-left:12px;background:#d4af37;color:#fff;border:none;padding:8px 18px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;border-radius:8px;cursor:pointer;}
 .btn-ready{flex:1;background:#4CFF6C;color:#111;border:none;padding:12px 20px;font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:700;border-radius:8px;cursor:pointer;display:none;}
 .btn-ready:hover{background:#2ecc71;}
 .btn-ready.is-ready{background:rgba(76,255,108,0.15);color:#4CFF6C;cursor:default;}
@@ -110,14 +110,14 @@ td.room-enter{text-align:right;}
 .ready-status{font-size:12px;color:rgba(255,255,255,0.25);letter-spacing:1px;margin-top:10px;text-align:center;}
 
 /* STATUS */
-#statusbar{position:fixed;bottom:0;left:0;right:0;padding:8px 32px;font-size:11px;color:rgba(255,255,255,0.2);letter-spacing:1px;background:#080812;border-top:1px solid rgba(255,255,255,0.05);}
+#statusbar{position:fixed;bottom:0;left:0;right:0;padding:8px 32px;font-size:11px;color:rgba(255,255,255,0.2);letter-spacing:1px;background:#000000;border-top:1px solid rgba(255,255,255,0.05);}
 #statusbar.ok{color:#4CFF6C;}
 #statusbar.err{color:#ff4444;}
 
 /* MODAL */
 .toggle-row{display:flex;gap:8px;margin-bottom:14px;}
 .toggle-btn{flex:1;padding:9px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:rgba(255,255,255,0.4);font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;cursor:pointer;}
-.toggle-btn.active{background:rgba(180,80,255,0.2);border-color:rgba(180,80,255,0.5);color:#b450ff;}
+.toggle-btn.active{background:rgba(212,175,55,0.2);border-color:rgba(212,175,55,0.5);color:#d4af37;}
 
 .tenten-back{font-family:'Space Grotesk',sans-serif;font-size:13px;letter-spacing:1px;color:rgba(255,255,255,0.6);text-decoration:none;margin-right:14px;white-space:nowrap;}
 .tenten-back:hover{color:#fff;}
@@ -128,13 +128,13 @@ td.room-enter{text-align:right;}
 .pz-header-right{display:flex;gap:10px;align-items:center;}
 .pz-btn{padding:9px 18px;border-radius:8px;border:none;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.5px;transition:opacity .15s;}
 .pz-btn:hover{opacity:.85;}
-.pz-btn-accent{background:#b450ff;color:#fff;}
+.pz-btn-accent{background:#d4af37;color:#fff;}
 .pz-btn-ghost{background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.7);border:1px solid rgba(255,255,255,0.12);}
 .pz-btn-sm{padding:6px 14px;font-size:12px;}
 .pz-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.8);display:none;align-items:center;justify-content:center;z-index:100;}
 .pz-modal-bg.open{display:flex;}
 .pz-modal{background:#111;border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:28px;width:100%;max-width:380px;}
-.pz-modal h3{font-family:'Press Start 2P',monospace;font-size:11px;color:#b450ff;margin-bottom:20px;letter-spacing:1px;}
+.pz-modal h3{font-family:'Press Start 2P',monospace;font-size:11px;color:#d4af37;margin-bottom:20px;letter-spacing:1px;}
 .pz-field{margin-bottom:14px;}
 .pz-field label{display:block;font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:6px;letter-spacing:.5px;}
 .pz-field input{width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 14px;color:#fff;font-size:14px;font-family:'Space Grotesk',sans-serif;outline:none;}
@@ -155,12 +155,18 @@ td.room-enter{text-align:right;}
 .pick-msg{font-size:13px;color:rgba(255,255,255,0.7);line-height:1.5;margin-bottom:14px;}
 .ready-prize{background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.85);border:1px solid rgba(255,255,255,0.18);}
 .ready-open{background:rgba(255,210,74,0.08);color:#FFD24A;border:1px solid rgba(255,210,74,0.45);}
-.change-btn{background:none;border:1px solid rgba(180,80,255,0.5);color:#b450ff;border-radius:6px;padding:3px 8px;margin-left:6px;font-size:11px;font-weight:700;font-family:'Space Grotesk',sans-serif;cursor:pointer;white-space:nowrap;}
-.change-btn:hover{background:rgba(180,80,255,0.15);}
+.change-btn{background:none;border:1px solid rgba(212,175,55,0.5);color:#d4af37;border-radius:6px;padding:3px 8px;margin-left:6px;font-size:11px;font-weight:700;font-family:'Space Grotesk',sans-serif;cursor:pointer;white-space:nowrap;}
+.change-btn:hover{background:rgba(212,175,55,0.15);}
 .p-ready-cell .ready-badge{display:inline-block;margin:2px 0 2px 4px;}
 .prize-status{font-size:13px;line-height:1.5;color:rgba(255,255,255,0.6);margin:-12px 0 18px;}
 .prize-status.ok{color:#4CFF6C;}
 .chat-prize{color:rgba(255,210,74,0.85);font-style:italic;}
+/* FOOTY theme: Champions Gold (black, gold glow, gold accents) */
+.nav-logo{font-family:'Lilita One',sans-serif;color:#d4af37;letter-spacing:6px;font-size:26px;font-weight:400}
+.btn-purple,.btn-start-now:not(:disabled),.pz-btn-accent,.rematch-box button{color:#1a1405}
+body{background:radial-gradient(ellipse 70% 50% at 50% 0%,rgba(212,175,55,.14),transparent 70%),#0c0b08 fixed;}
+.panel{background:rgba(20,18,12,.92);border-color:rgba(212,175,55,.3)}
+.nav{border-bottom:1px solid rgba(212,175,55,.35)}
 </style>
 </head>
 <body>
@@ -272,11 +278,11 @@ td.room-enter{text-align:right;}
 </div>
 
 <!-- Login gate: shown when there's no tenten.run login handoff -->
-<div id="login-gate" style="display:none;position:fixed;inset:0;z-index:300;background:rgba(8,8,16,0.95);align-items:center;justify-content:center;padding:16px;">
-  <div style="background:#111;border:1px solid rgba(180,80,255,0.4);border-radius:12px;padding:28px;max-width:380px;text-align:center;font-family:'Space Grotesk',sans-serif;">
-    <div style="font-family:'Press Start 2P',monospace;font-size:11px;color:#b450ff;margin-bottom:16px;">LOG IN TO PLAY</div>
+<div id="login-gate" style="display:none;position:fixed;inset:0;z-index:300;background:rgba(8,7,5,0.96);align-items:center;justify-content:center;padding:16px;">
+  <div style="background:#111;border:1px solid rgba(212,175,55,0.4);border-radius:12px;padding:28px;max-width:380px;text-align:center;font-family:'Space Grotesk',sans-serif;">
+    <div style="font-family:'Press Start 2P',monospace;font-size:11px;color:#d4af37;margin-bottom:16px;">LOG IN TO PLAY</div>
     <div id="login-gate-msg" style="font-size:13px;color:rgba(255,255,255,0.6);line-height:1.6;margin-bottom:20px;">FOOTY pays real prizes, so you need a tenten.run account. Log in on tenten.run, then press PLAY on FOOTY.</div>
-    <a href="https://www.tenten.run/?play=footymp" style="display:inline-block;background:#b450ff;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700;">Log in on tenten.run to play</a>
+    <a href="https://www.tenten.run/?play=footymp" style="display:inline-block;background:#d4af37;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700;">Log in on tenten.run to play</a>
   </div>
 </div>
 
@@ -347,7 +353,7 @@ let footyAuth = window.footyAuth();
 if (!footyAuth) document.getElementById('login-gate').style.display = 'flex';
 
 const socket = io();
-const COLORS = ['#b450ff','#4488FF'];
+const COLORS = ['#d4af37','#4488FF'];
 let myName = footyAuth ? (footyAuth.name || 'Player') : '';
 let myRoom = null, isMaster = false, isReady = false, roomIsPublic = true, pendingReady = false;
 let myRoomPassword = '';   // the private room password this player created/joined with (shown in the room view)
