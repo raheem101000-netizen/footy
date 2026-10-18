@@ -1,0 +1,95 @@
+import { pool } from "./db";
+import { Prize, prizeAmount, entryFeeFor } from "./prizes";
+import { recordSettledMatch } from "./settledMatches";
+
+/**
+ * FOOTY 1v1 win credit — same pattern as FIFA / Puz Royale / Kurver:
+ * ONE database transaction, credited exactly once per match.
+ *
+ * A FOOTY game_room hosts exactly one 1v1 match (no rematch: a new match is a
+ * new room from the lobby), so the dedupe key is the room:
+ * game_wins.stripe_payment_id = 'footymp:<roomId>' (plain UNIQUE index).
+ * A retry, a reconnect, or two end-of-match paths racing all hit the same key.
+ *
+ * The prize is the one both players agreed on in the lobby ($5 or $10,
+ * dollars), from the shared table in prizes.ts. The lobby passes it to the
+ * game_room when it launches the match; nothing the game page sends feeds into it.
+ */
+export const FOOTYMP_GAME = "footymp";
+const FOOTYMP_TIER = "1V1";
+const FOOTYMP_MATCH_NUMBER = 0; // NOT NULL in the shared tables; no cycle position
+
+/**
+ * Payout kill-switch. ON by default (unset = on). FOOTYMP_PAYOUTS_ENABLED=false
+ * (exactly "false") turns payouts OFF: matches play normally, creditFootyWin
+ * credits nothing and touches no tables. Read on every call — switching is
+ * just setting the variable in Render.
+ */
+export function payoutsEnabled(): boolean {
+  return process.env.FOOTYMP_PAYOUTS_ENABLED !== "false";
+}
+
+export function footyCreditKey(roomId: string) {
+  return `footymp:${roomId}`;
+}
+
+export type CreditOutcome =
+  | { status: "credited"; amount: string; balanceBefore: string; balanceAfter: string }
+  | { status: "already_credited" }
+  | { status: "disabled" };
+
+export async function creditFootyWin(opts: { roomId: string; winnerUserId: number; loserUserId: number | null; prize: Prize; entriesCharged?: boolean }): Promise<CreditOutcome> {
+  if (!payoutsEnabled()) return { status: "disabled" };
+  const key = footyCreditKey(opts.roomId);
+  const amount = prizeAmount(opts.prize);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const claim = await client.query(
+      `INSERT INTO game_wins (player_id, game, match_number, stripe_payment_id)
+       VALUES ($1, $2, $3, $4) ON CONFLICT (stripe_payment_id) DO NOTHING RETURNING id`,
+      [opts.winnerUserId, FOOTYMP_GAME, FOOTYMP_MATCH_NUMBER, key]
+    );
+    if (!claim.rowCount) { await client.query("ROLLBACK"); return { status: "already_credited" }; }
+
+    const before = await client.query(`SELECT COALESCE(balance, 0) AS balance FROM users WHERE id = $1 FOR UPDATE`, [opts.winnerUserId]);
+    if (!before.rowCount) throw new Error(`winner user ${opts.winnerUserId} not found`);
+    const after = await client.query(
+      `UPDATE users SET balance = COALESCE(balance, 0) + $2::numeric WHERE id = $1 RETURNING balance`,
+      [opts.winnerUserId, amount]
+    );
+    await client.query(
+      `INSERT INTO balance_ledger (player_id, game, match_number, reason, delta, balance_before, balance_after, stripe_payment_id)
+       VALUES ($1, $2, $3, 'win_credit', $4::numeric, $5, $6, $7)`,
+      [opts.winnerUserId, FOOTYMP_GAME, FOOTYMP_MATCH_NUMBER, amount, before.rows[0].balance, after.rows[0].balance, key]
+    );
+    await client.query(
+      `INSERT INTO match_results (player_id, game, stripe_payment_id, outcome, tier, match_number, credited)
+       VALUES ($1, $2, $3, 'win', $4, $5, true) ON CONFLICT (stripe_payment_id) DO NOTHING`,
+      [opts.winnerUserId, FOOTYMP_GAME, key, FOOTYMP_TIER, FOOTYMP_MATCH_NUMBER]
+    );
+    if (opts.loserUserId) {
+      await client.query(
+        `INSERT INTO match_results (player_id, game, stripe_payment_id, outcome, tier, match_number, credited)
+         VALUES ($1, $2, $3, 'loss', $4, $5, false) ON CONFLICT (stripe_payment_id) DO NOTHING`,
+        [opts.loserUserId, FOOTYMP_GAME, `${key}:loss`, FOOTYMP_TIER, FOOTYMP_MATCH_NUMBER]
+      );
+    }
+    // The settled-match record (creator program): same transaction, same key.
+    await recordSettledMatch(client, {
+      matchKey: key, game: "footy", winnerUserId: opts.winnerUserId,
+      loserUserIds: opts.loserUserId ? [opts.loserUserId] : [],
+      prize: amount, entryPrice: entryFeeFor(opts.prize),
+      // Charged matches: both players paid, whether or not the loser showed up.
+      payingPlayers: opts.entriesCharged ? 2 : (opts.loserUserId ? 2 : 1),
+      entriesCharged: !!opts.entriesCharged,
+    });
+    await client.query("COMMIT");
+    return { status: "credited", amount, balanceBefore: Number(before.rows[0].balance).toFixed(2), balanceAfter: Number(after.rows[0].balance).toFixed(2) };
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
