@@ -227,7 +227,7 @@ function connect() {
   socket.on('roomJoined', (d) => { joined = true; mySide = d.side || (d.role === 'p1' ? 'L' : 'R'); if (d.myName) myName = d.myName; if (d.prize) matchPrize = d.prize; });
   socket.on('opponentName', ({ name }) => { oppName = name || 'Opponent'; });
   socket.on('presence', ({ p1Away, p2Away }) => { oppAway = mySide === 'L' ? !!p2Away : !!p1Away; setConn(); });
-  socket.on('kickoff', () => { snaps.length = 0; renderF = null; effects.length = 0; trail.length = 0; hide('result'); });
+  socket.on('kickoff', () => { snaps.length = 0; renderF = null; KICK.ov = null; effects.length = 0; trail.length = 0; hide('result'); });
   socket.on('s', onSnap);
   socket.on('pong', (d) => { if (d && d.ts) { const ms = performance.now() - d.ts; if (ms > 0 && ms < 2000) rtt += (ms - rtt) * .3; } });
   setInterval(() => { if (socket && socket.connected) socket.emit('ping', { ts: performance.now() }); }, 1000);
@@ -585,6 +585,80 @@ function myDrawn(Pv) {
   return out;
 }
 
+/* ---------------- kicks judged from your screen (like Pong's hits) ----------------
+ * When your boot touches the ball as YOU see it, the ball flies off on your screen at once and
+ * the server is told which moment you were seeing; it checks that against its own record of that
+ * moment and gives the ball the same bounce (footy/sim.ts claimKick — same arithmetic as here). */
+function kickFly(x, y, vx, vy, r, frames) {
+  for (let i = 0; i < frames * 3; i++) {
+    vy += 300 / 96; x += vx / 96; y += vy / 96;
+    if (x < 5 + r) { x = 5 + r; vx = Math.abs(vx); }
+    if (x > 795 - r) { x = 795 - r; vx = -Math.abs(vx); }
+    if (y < 5 + r) { y = 5 + r; vy = Math.abs(vy); }
+    if (y > 460 - r) { y = 460 - r; vy = -Math.abs(vy) * 0.6; }
+  }
+  return { x, y, vx, vy };
+}
+function kickBounce(bx, by, bvx, bvy, cx, cy, tvx, tvy) {
+  let nx = bx - cx, ny = by - cy; const d = Math.hypot(nx, ny) || 1; nx /= d; ny /= d;
+  const vn = (bvx - tvx) * nx + (bvy - tvy) * ny;
+  if (vn >= 0) return null;
+  return { vx: bvx - 2 * vn * nx, vy: bvy - 2 * vn * ny };
+}
+const KICK = { lastT: -1e9, ov: null, offX: 0, offY: 0, near: 0 };
+function checkKick(v, now) {
+  if (!pred.on || !v || !v.w || !v.b || renderF === null) return;
+  if (!keysNow().k || now - KICK.lastT < 280) return;
+  const S = myNewest(), P = S && S[mySide];
+  if (!P || P[8] || P[10]) return;                                   // broken leg or bombed: no kick
+  const omega = wrapA(pred.ba - pred.pba) * 30;                        // boot's turning speed, rad/s
+  if (Math.abs(omega) < 2) return;                                     // not swinging
+  const fc = Math.round(renderF), snap = snaps.find(q => q.f === fc);
+  if (!snap || !snap.w || !snap.b || snap.b.length < 7) return;
+  const bx = snap.b[0], by = snap.b[1], r = snap.b[3], bvx = snap.b[5], bvy = snap.b[6];
+  const D = myDrawn(v[mySide]); if (!D) return;
+  const ox = D[3], oy = D[4], a = D[5], hw = 20 * D[7], hh = 5 * D[7], ca = Math.cos(a), sa = Math.sin(a);
+  const dx = bx - ox, dy = by - oy;
+  const lx = Math.max(-hw, Math.min(hw, dx * ca + dy * sa)), ly = Math.max(-hh, Math.min(hh, -dx * sa + dy * ca));
+  let cx = ox + lx * ca - ly * sa, cy = oy + lx * sa + ly * ca;
+  const dist = Math.hypot(bx - cx, by - cy);
+  if (dist > r + 1) return;                                            // boot not touching the ball on this screen
+  // the contact, on the ball's surface (as the server checks it)
+  let ux = cx - bx, uy = cy - by; const ul = Math.hypot(ux, uy);
+  if (ul < 0.01) { ux = D[0] - bx; uy = D[1] - by; } const un = Math.hypot(ux, uy) || 1;
+  cx = bx + ux / un * r; cy = by + uy / un * r;
+  // the boot's speed at the contact: the head's movement plus the swing
+  const tvx = pred.xs - omega * (cy - D[1]), tvy = pred.vy + omega * (cx - D[0]);
+  const out = kickBounce(bx, by, bvx, bvy, cx, cy, tvx, tvy);
+  if (!out) return;
+  KICK.lastT = now;
+  socket.emit('kick', { f: fc, cx: Math.round(cx * 100) / 100, cy: Math.round(cy * 100) / 100, tvx: Math.round(tvx * 100) / 100, tvy: Math.round(tvy * 100) / 100 });
+  KICK.ov = { fc, x: bx, y: by, vx: out.vx, vy: out.vy, r, t0: now }; KICK.offX = KICK.offY = 0; KICK.near = 0;
+  playSound('kickSound'); effects.push({ k: 'ring', x: cx, y: cy, xs: 0, ys: 0, t: 0 });
+}
+// The ball as drawn: while your own kick is on its way to the server, its flight from your kick;
+// then the server's ball again (any small difference fades out).
+function ballDrawn(v, dt, now) {
+  if (!v || !v.w || !v.b) return v;
+  const fade = Math.exp(-dt / 100); KICK.offX *= fade; KICK.offY *= fade;
+  let x = v.b[0], y = v.b[1];
+  const ov = KICK.ov;
+  if (ov) {
+    const n = Math.max(0, renderF - ov.fc), i = Math.floor(n), t = n - i;
+    const p0 = kickFly(ov.x, ov.y, ov.vx, ov.vy, ov.r, i), p1 = kickFly(ov.x, ov.y, ov.vx, ov.vy, ov.r, i + 1);
+    const kx = p0.x + (p1.x - p0.x) * t, ky = p0.y + (p1.y - p0.y) * t;
+    const close = Math.hypot(kx - x, ky - y) < 5;
+    KICK.near = close && now - ov.t0 > rtt * .5 ? KICK.near + 1 : 0;
+    if (KICK.near >= 2 || now - ov.t0 > rtt + delayF * 1000 / 30 + 250 || !v.w) {   // the server has it now (or said no): back to the server's ball
+      KICK.offX = kx - x; KICK.offY = ky - y; KICK.ov = null;
+    } else { x = kx; y = ky; }
+  }
+  x += KICK.offX; y += KICK.offY;
+  if (x === v.b[0] && y === v.b[1]) return v;
+  const b = v.b.slice(); b[0] = x; b[1] = y;
+  return Object.assign({}, v, { b });
+}
+
 /* ---------------- interpolation between server frames ---------------- */
 const lerp = (a, b, t) => a + (b - a) * t;
 const lerpA = (a, b, t) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return a + d * t; };
@@ -623,7 +697,10 @@ function frame(now) {
   // effects advance at the game's 30 frames a second
   fxAcc += dt * 30 / 1000;
   while (fxAcc >= 1) { fxAcc -= 1; stepEffects(); }
-  draw(renderF === null ? null : viewAt(renderF));
+  let view = renderF === null ? null : viewAt(renderF);
+  checkKick(view, now);
+  view = ballDrawn(view, dt, now);
+  draw(view);
   requestAnimationFrame(frame);
 }
 function stepEffects() {
@@ -654,7 +731,7 @@ function draw(v) {
     if (v.st) { const sp = { x: v.st[0], y: v.st[1] }; ctx.fillStyle = '#f1c7a1'; ctx.beginPath(); ctx.arc(sp.x, sp.y, 20, 0, 7); ctx.fill();
       ctx.fillStyle = '#5a3a1e'; ctx.fillRect(sp.x - 18, sp.y - 20, 36, 8); ctx.fillStyle = '#111'; ctx.fillRect(sp.x - 8, sp.y - 4, 4, 4); ctx.fillRect(sp.x + 4, sp.y - 4, 4, 4);
       ctx.fillStyle = '#c0392b'; ctx.fillRect(sp.x - 7, sp.y + 8, 14, 3); }
-    window.__oppX = (mySide === 'R' ? v.L : v.R)[0]; window.__ballX = v.b[0];
+    window.__oppX = (mySide === 'R' ? v.L : v.R)[0]; window.__ballX = v.b[0]; window.__ballY = v.b[1];
     // the opponent behind, you in front
     if (mySide === 'R') { drawPlayer(v.L, false, false, v.f); drawPlayer(myDrawn(v.R), true, true, v.f); }
     else { drawPlayer(v.R, true, false, v.f); drawPlayer(myDrawn(v.L), false, true, v.f); }
@@ -718,7 +795,7 @@ function draw(v) {
 
 connect();
 requestAnimationFrame(t => { lastT = t; frame(t); });
-window.__footy = { snaps, pred, get rtt() { return rtt; }, get delayF() { return delayF; }, get side() { return mySide; }, keysNow };   // test hook
+window.__footy = { snaps, pred, KICK, get rtt() { return rtt; }, get delayF() { return delayF; }, get side() { return mySide; }, keysNow };   // test hook
 })();
 </script>
 </body>

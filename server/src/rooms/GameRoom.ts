@@ -171,6 +171,13 @@ export class GameRoom extends Room {
       later(() => { if (this.sim && !this.finalResult) this.sim.setKeys(SIDE_OF(idx), keys); });
     });
 
+    // A kick as the kicker's screen saw it (footy/sim.ts claimKick): judged from that moment.
+    this.onMessage("kick", (client: Client, data: any) => {
+      const idx = this.gameJoined.findIndex(p => p.sessionId === client.sessionId);
+      if (idx === -1) return;
+      later(() => { if (this.sim && !this.finalResult) { const ok = this.sim.claimKick(SIDE_OF(idx), data); if (TEST_LAG_MS) console.log('[kick] ' + SIDE_OF(idx) + ' f=' + data?.f + ' ' + (ok ? 'COUNTED' : 'not counted: ' + this.sim.lastKickWhy)); } });
+    });
+
     // Quitting a live match is an instant loss (same rule as every 1v1 game).
     this.onMessage("forfeit", (client: Client) => {
       const idx = this.gameJoined.findIndex(p => p.sessionId === client.sessionId);
