@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FOOTY — Rooms</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{width:100%;min-height:100%;background:#0d0d1a;color:#fff;font-family:'Space Grotesk',sans-serif;}
+
+/* NAV */
+.nav{display:flex;align-items:center;justify-content:space-between;padding:14px 32px;border-bottom:1px solid rgba(255,255,255,0.07);background:#080812;}
+.nav-logo{font-size:20px;letter-spacing:8px;font-weight:300;}
+.nav-right{font-size:11px;color:rgba(255,255,255,0.25);letter-spacing:2px;}
+
+/* NAME BAR */
+.name-bar{display:flex;align-items:center;gap:10px;padding:10px 32px;background:#0a0a16;border-bottom:1px solid rgba(255,255,255,0.05);}
+.name-bar label{font-size:11px;color:rgba(255,255,255,0.3);letter-spacing:1px;}
+.name-input{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#fff;padding:7px 14px;font-size:13px;font-family:'Space Grotesk',sans-serif;border-radius:8px;outline:none;width:180px;}
+.name-input:focus{border-color:rgba(180,80,255,0.5);}
+.btn-purple{background:#b450ff;color:#fff;border:none;padding:8px 18px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;border-radius:8px;cursor:pointer;}
+.btn-purple:hover{opacity:0.85;}
+
+/* CONTAINER */
+.container{max-width:1000px;margin:0 auto;padding:24px;}
+/* LAYOUT (same as FIFA's lobby): list left, room right; one column ≤700px */
+.layout{display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start;}
+.panel{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;overflow:hidden;}
+.panel-head{padding:14px 18px;border-bottom:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.panel-title{font-size:12px;font-weight:700;letter-spacing:1px;color:rgba(255,255,255,0.5);text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.panel-empty{padding:40px 20px;text-align:center;color:rgba(255,255,255,0.25);font-size:13px;}
+#room-detail{padding:14px 18px 18px;}
+@media(max-width:700px){.container{padding:16px;}.layout{grid-template-columns:1fr;}}
+
+/* ROOM LIST HEADER */
+
+/* ROOMS TABLE */
+#rooms-table{width:100%;border-collapse:collapse;}
+#rooms-table tbody tr{border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;transition:background 0.1s;}
+#rooms-table tbody tr:hover{background:rgba(255,255,255,0.03);}
+#rooms-table tbody td{padding:14px 16px;font-size:14px;color:rgba(255,255,255,0.6);}
+td.room-name{color:#fff;font-weight:500;}
+td.room-players{font-size:13px;}
+td.room-enter{text-align:right;}
+.room-enter-btn{display:inline-flex;align-items:center;gap:6px;background:rgba(180,80,255,0.15);border:1px solid rgba(180,80,255,0.4);color:#b450ff;padding:7px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'Space Grotesk',sans-serif;transition:all 0.15s;}
+.room-enter-btn:hover{background:rgba(180,80,255,0.25);border-color:#b450ff;}
+.room-enter-btn.spectate{background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.15);color:rgba(255,255,255,0.4);}
+#rooms-empty{padding:48px 0;text-align:center;color:rgba(255,255,255,0.2);font-size:14px;line-height:2.2;}
+
+/* JOIN BY CODE */
+.btn-outline{background:transparent;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.5);padding:9px 18px;font-family:'Space Grotesk',sans-serif;font-size:13px;border-radius:8px;cursor:pointer;transition:all 0.15s;}
+.btn-outline:hover{border-color:rgba(255,255,255,0.4);color:#fff;}
+
+/* ROOM DETAIL */
+#room-detail{display:none;}
+.room-detail-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;}
+.room-detail-header h2{font-size:22px;font-weight:600;}
+.room-code-wrap{margin-bottom:16px;}
+.room-code-label{font-size:10px;color:rgba(255,255,255,0.3);letter-spacing:2px;margin-bottom:4px;}
+.room-code-val{font-size:32px;font-weight:700;font-family:monospace;color:#b450ff;letter-spacing:10px;}
+
+/* START BTN */
+.btn-start-now{flex:1;background:#b450ff;color:#fff;border:none;padding:12px 20px;font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:700;border-radius:10px;cursor:pointer;display:none;}
+.btn-start-now:not(:disabled){background:#b450ff;}
+.btn-start-now:disabled{background:rgba(180,80,255,0.2);color:rgba(255,255,255,0.3);cursor:not-allowed;}
+
+/* PLAYERS TABLE */
+.players-count{font-size:14px;color:rgba(255,255,255,0.4);margin-bottom:12px;}
+#players-table{width:100%;border-collapse:collapse;margin-bottom:24px;}
+#players-table thead th{font-size:11px;color:rgba(255,255,255,0.25);letter-spacing:2px;padding:8px 12px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.07);font-weight:500;}
+#players-table tbody td{padding:12px 12px;font-size:14px;border-bottom:1px solid rgba(255,255,255,0.04);}
+.p-color-dot{width:12px;height:12px;border-radius:50%;display:inline-block;margin-right:8px;vertical-align:middle;}
+.p-name-cell{color:#fff;}
+.p-ready-cell{text-align:right;}
+.ready-badge{font-size:11px;padding:4px 12px;border-radius:6px;font-weight:600;letter-spacing:1px;}
+.ready-yes{background:rgba(76,255,108,0.15);color:#4CFF6C;}
+.ready-no{background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.3);}
+.conn-notice{display:none;margin:12px 32px 0;padding:9px 14px;border-radius:8px;font-size:13px;font-weight:600;background:rgba(255,180,0,0.1);border:1px solid rgba(255,180,0,0.35);color:#FFB400;}
+.room-notice{font-size:12px;line-height:1.5;color:rgba(255,255,255,0.4);margin:0 0 18px;}
+.kick-btn{background:none;border:1px solid rgba(255,85,85,0.35);color:#ff6b6b;border-radius:6px;width:26px;height:26px;line-height:22px;font-size:12px;cursor:pointer;padding:0;}
+.kick-btn:hover{background:rgba(255,85,85,0.15);}
+.ready-host{background:rgba(180,80,255,0.15);color:#b450ff;}
+.p-empty{color:rgba(255,255,255,0.2);font-style:italic;padding:16px 12px;}
+
+/* CHAT */
+.chat-wrap{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;overflow:hidden;margin-bottom:16px;}
+.chat-msgs{height:180px;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:6px;}
+.chat-line{font-size:13px;color:rgba(255,255,255,0.4);}
+.chat-author{color:rgba(255,255,255,0.6);font-weight:500;}
+.chat-sys{color:rgba(255,255,255,0.2);font-style:italic;}
+.chat-form{display:flex;gap:8px;padding:10px 14px;border-top:1px solid rgba(255,255,255,0.06);}
+.chat-form input{flex:1;background:transparent;border:none;color:#fff;font-size:13px;font-family:'Space Grotesk',sans-serif;outline:none;}
+.chat-form input::placeholder{color:rgba(255,255,255,0.2);}
+
+/* ACTIONS */
+.room-actions{display:flex;gap:10px;align-items:center;}
+.rematch-box{display:none;margin:0 0 18px;padding:12px 16px;border-radius:10px;background:rgba(180,80,255,0.1);border:1px solid rgba(180,80,255,0.4);color:#e6ccff;font-size:14px;font-weight:600;}
+.pay-box{display:none;margin:0 0 18px;padding:14px 16px;border-radius:10px;background:rgba(255,210,74,0.08);border:1px solid rgba(255,210,74,0.5);color:#FFE7A0;font-size:14px;font-weight:600;line-height:1.45;}
+.pay-box .pay-btn{display:inline-block;margin-top:10px;background:#FFD24A;color:#1a1200;text-decoration:none;padding:10px 20px;font-size:14px;font-weight:700;border-radius:8px;}
+.pay-box .pay-btn:hover{opacity:.9;}
+.pay-box .pay-paid{display:inline-block;margin-top:8px;color:#4CFF6C;}
+.pay-box .pay-sub{margin-top:8px;font-size:12px;font-weight:500;color:rgba(255,231,160,0.7);}
+.rematch-box button{margin-left:12px;background:#b450ff;color:#fff;border:none;padding:8px 18px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;border-radius:8px;cursor:pointer;}
+.btn-ready{flex:1;background:#4CFF6C;color:#111;border:none;padding:12px 20px;font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:700;border-radius:8px;cursor:pointer;display:none;}
+.btn-ready:hover{background:#2ecc71;}
+.btn-ready.is-ready{background:rgba(76,255,108,0.15);color:#4CFF6C;cursor:default;}
+.btn-leave{background:transparent;border:1px solid rgba(255,68,68,0.3);color:rgba(255,68,68,0.6);padding:6px 14px;font-family:'Space Grotesk',sans-serif;font-size:13px;border-radius:8px;cursor:pointer;}
+.btn-leave:hover{border-color:#ff4444;color:#ff4444;}
+.ready-status{font-size:12px;color:rgba(255,255,255,0.25);letter-spacing:1px;margin-top:10px;text-align:center;}
+
+/* STATUS */
+#statusbar{position:fixed;bottom:0;left:0;right:0;padding:8px 32px;font-size:11px;color:rgba(255,255,255,0.2);letter-spacing:1px;background:#080812;border-top:1px solid rgba(255,255,255,0.05);}
+#statusbar.ok{color:#4CFF6C;}
+#statusbar.err{color:#ff4444;}
+
+/* MODAL */
+.toggle-row{display:flex;gap:8px;margin-bottom:14px;}
+.toggle-btn{flex:1;padding:9px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:rgba(255,255,255,0.4);font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;cursor:pointer;}
+.toggle-btn.active{background:rgba(180,80,255,0.2);border-color:rgba(180,80,255,0.5);color:#b450ff;}
+
+.tenten-back{font-family:'Space Grotesk',sans-serif;font-size:13px;letter-spacing:1px;color:rgba(255,255,255,0.6);text-decoration:none;margin-right:14px;white-space:nowrap;}
+.tenten-back:hover{color:#fff;}
+/* Create + Join with Code pair and the join popup — same rules as Puz Royale's
+   lobby (.header-right / .btn / .btn-sm / .btn-ghost / .modal-bg / .modal /
+   .field / .modal-btns / .error-inline), pz- prefixed so they don't clash with
+   Pong's own .modal; Puz's red accent is Pong's purple here. */
+.pz-header-right{display:flex;gap:10px;align-items:center;}
+.pz-btn{padding:9px 18px;border-radius:8px;border:none;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.5px;transition:opacity .15s;}
+.pz-btn:hover{opacity:.85;}
+.pz-btn-accent{background:#b450ff;color:#fff;}
+.pz-btn-ghost{background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.7);border:1px solid rgba(255,255,255,0.12);}
+.pz-btn-sm{padding:6px 14px;font-size:12px;}
+.pz-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.8);display:none;align-items:center;justify-content:center;z-index:100;}
+.pz-modal-bg.open{display:flex;}
+.pz-modal{background:#111;border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:28px;width:100%;max-width:380px;}
+.pz-modal h3{font-family:'Press Start 2P',monospace;font-size:11px;color:#b450ff;margin-bottom:20px;letter-spacing:1px;}
+.pz-field{margin-bottom:14px;}
+.pz-field label{display:block;font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:6px;letter-spacing:.5px;}
+.pz-field input{width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 14px;color:#fff;font-size:14px;font-family:'Space Grotesk',sans-serif;outline:none;}
+.pz-field input::placeholder{color:rgba(255,255,255,0.25);}
+.pz-modal-btns{display:flex;gap:8px;margin-top:20px;}
+.pz-error-inline{font-size:12px;color:#FF5555;min-height:16px;margin-top:6px;}
+
+/* PRIZE (same rules and wording as FIFA's lobby) */
+.prize-tag{display:inline-block;font-size:12px;font-weight:700;padding:3px 9px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);color:#fff;white-space:nowrap;vertical-align:middle;margin-right:10px;}
+.prize-tag.gold{color:#FFD24A;border-color:rgba(255,210,74,0.6);background:rgba(255,210,74,0.12);}
+.prize-both{display:inline-flex;flex-direction:column;align-items:center;border:1.5px solid #FFD24A;border-radius:6px;padding:3px 8px;color:#FFD24A;line-height:1.2;white-space:nowrap;vertical-align:middle;margin-right:10px;}
+.prize-both b{font-size:9px;font-weight:700;letter-spacing:1px;}
+.prize-both span{font-size:10px;color:rgba(255,210,74,0.75);}
+.prize-opts{display:flex;flex-direction:column;gap:8px;}
+.prize-opt{display:flex;justify-content:space-between;align-items:center;text-align:left;padding:11px 14px;}
+.prize-opt small{font-size:11px;font-weight:500;opacity:.8;}
+.prize-opt.gold-opt.active{background:rgba(255,210,74,0.12);border-color:rgba(255,210,74,0.6);color:#FFD24A;}
+.pick-msg{font-size:13px;color:rgba(255,255,255,0.7);line-height:1.5;margin-bottom:14px;}
+.ready-prize{background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.85);border:1px solid rgba(255,255,255,0.18);}
+.ready-open{background:rgba(255,210,74,0.08);color:#FFD24A;border:1px solid rgba(255,210,74,0.45);}
+.change-btn{background:none;border:1px solid rgba(180,80,255,0.5);color:#b450ff;border-radius:6px;padding:3px 8px;margin-left:6px;font-size:11px;font-weight:700;font-family:'Space Grotesk',sans-serif;cursor:pointer;white-space:nowrap;}
+.change-btn:hover{background:rgba(180,80,255,0.15);}
+.p-ready-cell .ready-badge{display:inline-block;margin:2px 0 2px 4px;}
+.prize-status{font-size:13px;line-height:1.5;color:rgba(255,255,255,0.6);margin:-12px 0 18px;}
+.prize-status.ok{color:#4CFF6C;}
+.chat-prize{color:rgba(255,210,74,0.85);font-style:italic;}
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <div style="display:flex;align-items:center;"><a class="tenten-back" id="tenten-back" href="https://tenten.run/">← TENTEN</a><div class="nav-logo">FOOTY</div></div>
+  <div class="nav-right">MULTIPLAYER LOBBY</div>
+</div>
+
+<div class="name-bar">
+  <label>PLAYING AS</label>
+  <span class="name-input" id="account-name" style="display:inline-block;min-width:160px;"></span>
+</div>
+
+<div class="conn-notice" id="conn-notice"></div>
+
+<div class="container">
+<!-- Same layout as FIFA's lobby: open rooms on the left (always visible),
+     the room you're in on the right (players, Ready/Start, chat). One column,
+     list first, on narrow screens. -->
+<div class="layout">
+
+  <!-- Left: open rooms -->
+  <div class="panel" id="list-view">
+    <div class="panel-head">
+      <span class="panel-title" id="list-heading">Start by creating a room:</span>
+      <div class="pz-header-right">
+        <button class="pz-btn pz-btn-accent pz-btn-sm" id="btn-open-join">Join with Code</button>
+        <button class="pz-btn pz-btn-ghost pz-btn-sm" id="btn-create">+ Create</button>
+      </div>
+    </div>
+
+    <table id="rooms-table">
+      <tbody id="rooms-tbody"></tbody>
+    </table>
+    <div id="rooms-empty">No open rooms yet.</div>
+  </div>
+
+  <!-- Right: the room you're in -->
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-title" id="rh-name">Room</span>
+      <button class="btn-leave" id="btn-leave" style="display:none">Leave</button>
+    </div>
+
+    <!-- No room yet -->
+    <div id="room-empty" class="panel-empty">Create or join a room to start</div>
+
+    <div id="room-detail">
+      <div class="room-code-wrap" id="room-code-wrap">
+        <div class="room-code-label">ROOM CODE</div>
+        <div class="room-code-val" id="room-code-val">----</div>
+        <div id="room-code-pass" style="display:none;font-size:11px;color:rgba(255,255,255,0.45);margin-top:4px;">Password: <span id="room-code-pw" style="color:#fff;"></span></div>
+      </div>
+
+      <!-- Entry fees: the payment window after the host's Start (server: entryPayments.ts) -->
+      <div class="pay-box" id="pay-box"><div id="pay-text"></div><div class="pay-paid" id="pay-paid" style="display:none">✓ You've paid — you're ready</div><div class="pay-sub" id="pay-sub"></div></div>
+      <div class="rematch-box" id="rematch-box"><span id="rematch-text"></span><button id="btn-rematch" style="display:none">REMATCH</button></div>
+
+      <p class="players-count" id="players-count">No players</p>
+      <table id="players-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>NAME</th>
+            <th style="text-align:right">STATUS</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="players-tbody"></tbody>
+      </table>
+      <p class="prize-status" id="prize-status"></p>
+
+      <p class="room-notice">If you step away, your seat is kept for about 12 minutes.</p>
+
+      <div class="chat-wrap">
+        <div class="chat-msgs" id="chat-msgs"></div>
+        <div class="chat-form">
+          <input id="chat-input" type="text" placeholder="Say something..." maxlength="80" autocomplete="off"/>
+          <button class="btn-outline" id="btn-chat">Send</button>
+        </div>
+      </div>
+
+      <div class="room-actions">
+        <button class="btn-ready" id="btn-ready">Ready?</button>
+        <button class="btn-start-now" id="btn-start">Start now!</button>
+      </div>
+      <div class="ready-status" id="ready-status"></div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<div id="statusbar">Connecting...</div>
+
+<!-- Join with Code (same layout as Puz Royale's lobby; FOOTY's 4-digit room code) -->
+<div class="pz-modal-bg" id="join-modal">
+  <div class="pz-modal">
+    <h3 id="join-title">JOIN WITH CODE</h3>
+    <div class="pz-field" id="join-code-field"><label>ROOM CODE</label><input id="code-input" type="text" maxlength="4" inputmode="numeric" placeholder="4-digit room code" autocomplete="off"></div>
+    <div class="pz-field"><label id="join-pass-label">PASSWORD (PRIVATE ROOMS ONLY)</label><input id="join-password" type="password" maxlength="20" placeholder="Leave blank for public rooms" autocomplete="off"></div>
+    <div class="pz-error-inline" id="join-error"></div>
+    <div class="pz-modal-btns">
+      <button class="pz-btn pz-btn-accent" style="flex:1;" id="btn-joincode">Join</button>
+      <button class="pz-btn pz-btn-ghost" id="btn-join-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Login gate: shown when there's no tenten.run login handoff -->
+<div id="login-gate" style="display:none;position:fixed;inset:0;z-index:300;background:rgba(8,8,16,0.95);align-items:center;justify-content:center;padding:16px;">
+  <div style="background:#111;border:1px solid rgba(180,80,255,0.4);border-radius:12px;padding:28px;max-width:380px;text-align:center;font-family:'Space Grotesk',sans-serif;">
+    <div style="font-family:'Press Start 2P',monospace;font-size:11px;color:#b450ff;margin-bottom:16px;">LOG IN TO PLAY</div>
+    <div id="login-gate-msg" style="font-size:13px;color:rgba(255,255,255,0.6);line-height:1.6;margin-bottom:20px;">FOOTY pays real prizes, so you need a tenten.run account. Log in on tenten.run, then press PLAY on FOOTY.</div>
+    <a href="https://www.tenten.run/?play=footymp" style="display:inline-block;background:#b450ff;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700;">Log in on tenten.run to play</a>
+  </div>
+</div>
+
+<!-- CREATE MODAL -->
+<!-- Create (same layout as Puz Royale's lobby: name, Public/Private, password for Private) -->
+<div class="pz-modal-bg" id="modal-overlay">
+  <div class="pz-modal">
+    <h3>CREATE ROOM</h3>
+    <div class="pz-field"><label>ROOM NAME</label><input id="modal-name" type="text" maxlength="24" placeholder="e.g. Epic Battle" autocomplete="off"></div>
+    <div class="toggle-row">
+      <button class="toggle-btn active" id="toggle-public">Public</button>
+      <button class="toggle-btn" id="toggle-private">Private</button>
+    </div>
+    <div class="pz-field" id="modal-pass-field" style="display:none;"><label>PASSWORD</label><input id="modal-password" type="text" maxlength="20" placeholder="Room password" autocomplete="off"></div>
+    <div class="pz-field"><label>PRIZE</label>
+      <div class="prize-opts" id="create-prize-opts">
+        <button type="button" class="toggle-btn prize-opt" data-mode="5"><span data-win="5"></span><small data-fee="5"></small></button>
+        <button type="button" class="toggle-btn prize-opt gold-opt" data-mode="10"><span data-win="10"></span><small data-fee="10"></small></button>
+        <button type="button" class="toggle-btn prize-opt gold-opt" data-mode="both"><span>Open to both</span><small>Agree on $5 or $10 in the room</small></button>
+      </div>
+    </div>
+    <div class="pz-error-inline" id="create-error"></div>
+    <div class="pz-modal-btns">
+      <button class="pz-btn pz-btn-accent" style="flex:1;" id="btn-modal-confirm">Create</button>
+      <button class="pz-btn pz-btn-ghost" id="btn-modal-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pick a prize: joining a room that is open to both -->
+<div class="pz-modal-bg" id="pick-modal">
+  <div class="pz-modal">
+    <h3>PICK THE PRIZE</h3>
+    <div class="pick-msg">The host is open to both. Pick the prize</div>
+    <div class="prize-opts">
+      <button type="button" class="toggle-btn prize-opt" data-pick="5"><span data-win="5"></span><small data-fee="5"></small></button>
+      <button type="button" class="toggle-btn prize-opt gold-opt" data-pick="10"><span data-win="10"></span><small data-fee="10"></small></button>
+    </div>
+    <div class="pz-error-inline" id="pick-error"></div>
+    <div class="pz-modal-btns">
+      <button class="pz-btn pz-btn-ghost" style="flex:1;" id="btn-pick-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- The prize table (server/src/prizes.ts): prize and entry fee come from one place -->
+<script src="/prizes.js"></script>
+<script src="/colyseus-adapter.js"></script>
+<script>
+// ── tenten.run login handoff ─────────────────────────────────────────────────
+// Same pattern as FIFA / Puz Royale / Kurver: tenten.run's FOOTY
+// button issues a game_tokens token and redirects here with
+// #token=…&player_id=…&name=… (a fragment — never sent to the server). It's
+// kept on this device (localStorage, so a reload, new tab or bfcache stays
+// logged in; the game page reads it too), stripped from the address bar, and
+// sent on every Colyseus join by the adapter; the server's onAuth turns it
+// into the real user_id. No token → login gate.
+(function(){
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get('token') && h.get('player_id')) {
+    const a = JSON.stringify({ token: h.get('token'), playerId: Number(h.get('player_id')), name: h.get('name') || '' });
+    try { localStorage.setItem('footymp_auth', a); } catch (_) {}
+    try { sessionStorage.setItem('footymp_auth', a); } catch (_) {}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+})();
+let footyAuth = window.footyAuth();
+if (!footyAuth) document.getElementById('login-gate').style.display = 'flex';
+
+const socket = io();
+const COLORS = ['#b450ff','#4488FF'];
+let myName = footyAuth ? (footyAuth.name || 'Player') : '';
+let myRoom = null, isMaster = false, isReady = false, roomIsPublic = true, pendingReady = false;
+let myRoomPassword = '';   // the private room password this player created/joined with (shown in the room view)
+function esc(t) { return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+document.getElementById('account-name').textContent = myName;
+
+function status(msg, type) { const el=document.getElementById('statusbar'); el.textContent=msg; el.className=type||''; }
+// The room list is always shown (left); these switch the right panel between
+// "no room yet" and the room you're in.
+function showList() { document.getElementById('room-empty').style.display='block'; document.getElementById('room-detail').style.display='none'; document.getElementById('btn-leave').style.display='none'; document.getElementById('rh-name').textContent='Room'; }
+function showDetail() { document.getElementById('room-empty').style.display='none'; document.getElementById('room-detail').style.display='block'; document.getElementById('btn-leave').style.display='inline-block'; }
+
+
+// ── Seat & reconnection (same model as FIFA / Kurver) ───────────────────────
+// Our seat belongs to our account. On every new connection (first load,
+// reload, new tab, bfcache, or after a lost connection) we ask the server for
+// it back (room:rejoin); it hands over the same seat, ready state and host
+// role — or sends us to our match if it's still being played. The room is
+// remembered on this device only to say what's happening while we rejoin.
+// A tab whose seat was opened somewhere else stays on the room list.
+const ROOM_KEY = 'footymp_room', SUPERSEDED_KEY = 'footymp_superseded';
+function remember(code){ try { if (code) localStorage.setItem(ROOM_KEY, code); else localStorage.removeItem(ROOM_KEY); } catch (_) {} }
+function remembered(){ try { return localStorage.getItem(ROOM_KEY); } catch (_) { return null; } }
+function isSuperseded(){ try { return sessionStorage.getItem(SUPERSEDED_KEY) === '1'; } catch (_) { return false; } }
+function setSuperseded(on){ try { if (on) sessionStorage.setItem(SUPERSEDED_KEY, '1'); else sessionStorage.removeItem(SUPERSEDED_KEY); } catch (_) {} }
+function setConnNotice(t){ const el=document.getElementById('conn-notice'); el.textContent=t||''; el.style.display=t?'block':'none'; }
+function backToList(){ myRoom=null; isMaster=false; isReady=false; showList(); socket.emit('room:list'); }
+socket.on('connect', ()=>{
+  status('Connected','ok'); socket.emit('room:list');
+  if (!isSuperseded()) {
+    if (myRoom || remembered()) setConnNotice('Rejoining your room…');
+    socket.emit('room:rejoin', { code: (myRoom && myRoom.code) || remembered() });
+  }
+});
+socket.on('disconnect', ()=>status('Disconnected','err'));
+socket.on('drop', ()=>{ status('Reconnecting…','err'); setConnNotice(myRoom ? 'Connection lost — reconnecting. Your seat is kept.' : 'Connection lost — reconnecting…'); });
+socket.on('resume', ()=>{ setConnNotice(''); status('Reconnected','ok'); });
+// The room's whole chat again after a resume (redrawn, so nothing is doubled).
+socket.on('room:chat', ({chat})=>renderChat(chat));
+socket.on('room:rejoin:none', ()=>{
+  const had = myRoom || remembered();
+  remember(null); setConnNotice('');
+  if (myRoom) backToList();
+  if (had) status('Your room has closed — create or join a new one','err');
+});
+// Our account's match is still being played: back to it.
+socket.on('room:match', ({code})=>{ setConnNotice('Your match is still on — taking you back…'); remember(null); window.location.href='/footy-match.html?room='+encodeURIComponent(code); });
+// Our seat was opened in another tab or device: this tab steps back to the list.
+// Away longer than the seat hold: the server released our seat.
+socket.on('room:released', ({message})=>{ remember(null); backToList(); setConnNotice(message||'Your seat was released after being away too long.'); });
+socket.on('room:superseded', ({message})=>{ setSuperseded(true); backToList(); setConnNotice((message||'You opened this room somewhere else.')+' Join it again here to move it back.'); });
+socket.on('connect_error', (e)=>{ status('Cannot connect to server','err'); if (e && (e.code === 401 || /log in|login has expired/i.test(e.message || ''))) { try { localStorage.removeItem('footymp_auth'); sessionStorage.removeItem('footymp_auth'); } catch (_) {} if (e.message) document.getElementById('login-gate-msg').textContent = e.message; document.getElementById('login-gate').style.display = 'flex'; } });
+socket.on('room:error', ({message})=>{ status(message,'err');
+  if(document.getElementById('join-modal').classList.contains('open')) document.getElementById('join-error').textContent=message;
+  if(document.getElementById('modal-overlay').classList.contains('open')) document.getElementById('create-error').textContent=message;
+  if(document.getElementById('pick-modal').classList.contains('open')) document.getElementById('pick-error').textContent=message; });
+// Joining a room that is open to both: the server asks for our pick first.
+socket.on('room:pick-prize', ({code})=>openPickModal(code, lastJoin && lastJoin.code===code ? lastJoin.password : ''));
+
+socket.on('room:list', ({rooms})=>renderRoomList(rooms));
+socket.on('room:open',   ()=>socket.emit('room:list'));
+socket.on('room:close',  ()=>socket.emit('room:list'));
+socket.on('room:update', ()=>socket.emit('room:list'));
+
+// The host removed us: back to the room list with the reason.
+socket.on('room:kicked', ({message})=>{ remember(null); backToList(); status(message||'You were removed by the host','err'); });
+socket.on('room:created', ({room,chat})=>{ renderChat(chat); setSuperseded(false); remember(room.code); setConnNotice(''); closeCreateModal(); myRoom=room; isMaster=true; isReady=false; showDetail(); renderDetail(room); status(room.open===false?('Room created — code: '+room.code):'Public room created','ok'); });
+// Joined — or our own seat handed back (rejoined): seat, ready state and host role kept.
+socket.on('room:joined',  ({room,player,rejoined,chat})=>{ renderChat(chat); setSuperseded(false); remember(room.code); setConnNotice(''); closeJoinModal(); closePickModal(); myRoom=room; isMaster=!!(player&&player.master); isReady=!!(player&&player.ready); showDetail(); renderDetail(room); status(rejoined?('Back in room '+room.code):('Joined room '+room.code),'ok'); if(pendingReady){ pendingReady=false; isReady=true; socket.emit('room:ready'); updateActions(); status('Payment confirmed — ready!','ok'); } });
+socket.on('room:state',   room=>{
+  if(!myRoom || myRoom.code!==room.code) return;
+  myRoom=room;
+  if(!room.payment) payInfo=null;
+  const me=(room.players||[]).find(p=>p.id===socket.id);
+  if(!me){ remember(null); backToList(); return; }  // our seat is no longer in this room
+  isMaster=!!me.master; isReady=!!me.ready;
+  renderPlayers(room); updateActions();
+});
+socket.on('room:player:join',  ({player})=>{ sysMsg(player.name+' joined'); status(player.name+' joined','ok'); });
+socket.on('room:player:leave', ()=>{ sysMsg('A player left'); updateActions(); });
+socket.on('room:player:ready', ({player})=>status(player.name+' is ready!','ok'));
+socket.on('room:master', ({master})=>{ if(master===socket.id){ isMaster=true; updateActions(); status('You are now host','ok'); } });
+socket.on('room:talk', (m)=>chatLine(m));
+// Rematch: both players must press. Accepted → back to the normal Ready → Start flow.
+socket.on('room:rematch', ({accepted,cancelled})=>{
+  if(accepted){ sysMsg('Rematch on!'); status('Rematch on — agree on the prize and press Ready.','ok'); }
+  if(cancelled){ sysMsg(cancelled); setConnNotice(cancelled); status(cancelled,'err'); }
+});
+// Entry fees: READY is paying. Pressing it sends this page to the player's
+// own Stripe Checkout (same tab — the page rejoins the seat when they come
+// back); they show as ready (tick) once Stripe has confirmed the payment, and
+// the match starts when both have. The amount and the link come from the
+// server. The first Ready starts the clock for both players.
+let payInfo=null;
+socket.on('room:pay', p=>{
+  payInfo=p; renderPay(); updateActions();
+  if(p.go && p.url){ status('Opening secure payment…','ok'); window.location.href=p.url; }
+});
+// Refund Balance paid the whole entry (no card).
+socket.on('room:pay:credit', ({message})=>{ status(message,'ok'); setConnNotice(message); });
+socket.on('room:pay:cancelled', ({message})=>{ payInfo=null; renderPay(); updateActions(); setConnNotice(message); status(message,'err'); });
+function mmss(sec){ return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0'); }
+function renderPay(){
+  const box=document.getElementById('pay-box'), pw=myRoom&&myRoom.payment;
+  if(!pw){ box.style.display='none'; return; }
+  box.style.display='block';
+  const left=Math.max(0,Math.ceil((pw.deadline-Date.now())/1000));
+  const iPaid=(pw.paid||[]).includes(socket.id);
+  document.getElementById('pay-text').textContent='You and your opponent have '+mmss(left)+' to pay — if either of you doesn\'t, any entry paid is refunded to your Refund Balance.';
+  document.getElementById('pay-paid').style.display=iPaid?'inline-block':'none';
+  const waiting=(pw.waiting||[]).filter(n=>n!==myName);
+  document.getElementById('pay-sub').textContent=iPaid
+    ? (waiting.length?'Waiting for '+waiting.join(', ')+' to pay…':'Both paid — starting the match…')
+    : 'Entry $'+pw.entry+' for the $'+pw.prize+' prize — press READY to pay.';
+}
+setInterval(()=>{ if(myRoom && myRoom.payment) renderPay(); },1000);
+// Back from Stripe's page (the seat is rejoined as usual).
+(function(){
+  const q=new URLSearchParams(location.search), paid=q.get('paid');
+  if(paid==null) return;
+  history.replaceState(null,'',location.pathname+location.hash);
+  if(paid==='1') status('Payment received — confirming with Stripe…','ok');
+  else status('Payment cancelled — you can still pay before the timer runs out.','err');
+})();
+document.getElementById('btn-rematch').onclick=()=>{ if(myRoom&&myRoom.rematch) socket.emit('room:rematch'); };
+socket.on('room:game:start', ({code})=>{ remember(null); status('Game starting!','ok'); setTimeout(()=>{ window.location.href='/footy-match.html?room='+code+'&name='+encodeURIComponent(myName); },600); });
+
+function renderRoomList(rooms) {
+  const tbody=document.getElementById('rooms-tbody');
+  const empty=document.getElementById('rooms-empty');
+  const heading=document.getElementById('list-heading');
+  tbody.innerHTML='';
+  // Like Puz Royale: private rooms are listed with a PRIVATE badge; Join asks
+  // for their password (Join with Code popup, code filled in).
+  empty.style.display=rooms.length?'none':'block';
+  if(rooms.length===0) { heading.textContent='Start by creating a room:'; }
+  else if(rooms.length===1) { heading.textContent='You can join 1 room!'; }
+  else { heading.textContent='You can join '+rooms.length+' rooms!'; }
+  rooms.forEach((r,i)=>{
+    const tr=document.createElement('tr');
+    // A full room that holds our own seat (e.g. opened in another tab) can still be joined: it hands the seat back.
+    const full=r.players>=2 && r.id!==remembered();
+    tr.innerHTML=`
+      <td class="room-name">${esc(r.name)}${r.locked ? ' <span style="color:#FFB400;font-size:10px;letter-spacing:.5px;vertical-align:middle;">PRIVATE</span>' : ''}</td>
+      <td class="room-players">${r.players} player${r.players!==1?'s':''}</td>
+      <td class="room-enter">
+        ${prizeTagHtml(r.prizeMode)}${full
+          ? '<button class="room-enter-btn spectate" disabled>In Game</button>'
+          : r.locked
+            ? `<button class="room-enter-btn" onclick="openJoinModal('${esc(r.id)}', true)">Join</button>`
+            : `<button class="room-enter-btn" onclick="joinRoom('${esc(r.id)}')">Join</button>`}
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// The last join attempt, so the prize pick (room open to both) can repeat it.
+let lastJoin = null;
+function joinRoom(id) {
+  lastJoin={code:id,password:''};
+  socket.emit('room:join',{room:id});
+}
+
+function renderDetail(room) {
+  document.getElementById('rh-name').textContent=room.name;
+  document.getElementById('room-code-val').textContent=room.code;
+  document.getElementById('room-code-wrap').style.display=(room.open===false)?'block':'none';
+  document.getElementById('room-code-pass').style.display=(room.locked && myRoomPassword)?'block':'none';
+  document.getElementById('room-code-pw').textContent=myRoomPassword;
+  renderPlayers(room); updateActions();
+}
+
+function renderPlayers(room) {
+  const tbody=document.getElementById('players-tbody');
+  tbody.innerHTML='';
+  const players=room.players||[];
+  const count=document.getElementById('players-count');
+  count.textContent=players.length===0?'No players':players.length===1?'1 player':''+players.length+' players';
+  players.forEach((p,i)=>{
+    const tr=document.createElement('tr');
+    const isMe=p.id===socket.id;
+    // During the payment window a player who isn't here is on Stripe's page.
+    const away=p.away?' <span class="ready-badge ready-no" style="color:#FFB400;border-color:rgba(255,180,0,0.4);">'+(room.payment && !p.ready?'Paying…':'Away')+'</span>':'';
+    // Each name shows the player's prize state: "Open to both" (no pick yet),
+    // "Wants $X", or "Ready · $X". Only your own name gets controls: in a
+    // "both" room you pick/Change your prize; in a fixed room only the host
+    // can Change the room's prize.
+    const badge=(p.master?'<span class="ready-badge ready-host">HOST</span>':'')
+      +prizeStateTag(p)+(isMe && !room.rematch && !room.payment ? prizeControls(room,p) : '')+away;
+    // The host sees ✕ to remove the other player.
+    const kick=(isMaster && !p.master)?`<button class="kick-btn" title="Remove from room" onclick="kickPlayer('${esc(p.id)}')">✕</button>`:'';
+    tr.innerHTML=`
+      <td><span class="p-color-dot" style="background:${COLORS[i]||'#fff'}"></span></td>
+      <td class="p-name-cell">${esc(p.name)}${isMe?' <span style="color:rgba(255,255,255,0.3);font-size:11px;">(you)</span>':''}</td>
+      <td class="p-ready-cell">${badge}</td>
+      <td class="p-kick-cell">${kick}</td>`;
+    tbody.appendChild(tr);
+  });
+  if(players.length<2){
+    const tr=document.createElement('tr');
+    tr.innerHTML='<td colspan="3" class="p-empty">Waiting for opponent...</td>';
+    tbody.appendChild(tr);
+  }
+  const awayNames=players.filter(p=>p.away).map(p=>p.name);
+  document.getElementById('ready-status').textContent=awayNames.length?('Waiting for '+awayNames.join(', ')+' to come back'):'';
+  renderPrizeStatus(room);
+}
+
+// ── Prizes ───────────────────────────────────────────────────────────────────
+// $5 (entry $2.99) and $10 (entry $5.99), from the server's one table (/prizes.js).
+const PRIZES = window.FOOTY_PRIZES || {};
+function feeOf(v){ return '$'+((PRIZES[v]||{}).entryFee||'?'); }
+document.querySelectorAll('[data-win]').forEach(el=>{ el.textContent='Win $'+el.dataset.win; });
+document.querySelectorAll('[data-fee]').forEach(el=>{ el.textContent='Entry '+feeOf(el.dataset.fee); });
+// The prize tag shown next to a room in the list.
+function prizeTagHtml(mode){
+  if(mode==='both') return '<span class="prize-both"><b>OPEN TO BOTH</b><span>$5 or $10</span></span>';
+  if(mode==='10') return '<span class="prize-tag gold">$10</span>';
+  if(mode==='5') return '<span class="prize-tag">$5</span>';
+  return '';
+}
+function prizeStateTag(p){
+  if(!p.pick) return '<span class="ready-badge ready-open">Open to both</span>';
+  if(p.ready) return '<span class="ready-badge ready-yes">Ready · $'+p.pick+'</span>';
+  return '<span class="ready-badge ready-prize">Wants $'+p.pick+'</span>';
+}
+function prizeControls(room,me){
+  const both=room.prizeMode==='both';
+  if(!both && !me.master) return '';
+  if(both && !me.pick) return '<button class="change-btn" onclick="sendPrize(5)">$5</button><button class="change-btn" onclick="sendPrize(10)">$10</button>';
+  const other=me.pick===10?5:10;
+  return '<button class="change-btn" title="Switch to $'+other+'" onclick="sendPrize('+other+')">Change</button>';
+}
+function sendPrize(prize){ if(myRoom) socket.emit('room:prize',{prize}); }
+// The prize both players want (null: fewer than two, a pick missing, or different picks).
+function agreedPrize(room){
+  const ps=(room&&room.players)||[];
+  if(ps.length<2||!ps[0].pick) return null;
+  return ps.every(p=>p.pick===ps[0].pick)?ps[0].pick:null;
+}
+function renderPrizeStatus(room){
+  const el=document.getElementById('prize-status');
+  const ps=room.players||[];
+  let text='', ok=false;
+  if(room.rematch) text='';
+  else if(ps.some(p=>!p.pick)) text='Waiting for '+ps.find(p=>!p.pick).name+' to choose a prize.';
+  else if(ps.length<2) text='Waiting for an opponent.';
+  else {
+    const host=ps.find(p=>p.master)||ps[0], joiner=ps.find(p=>p!==host);
+    const agreed=agreedPrize(room);
+    if(!agreed) text='Not agreed yet: '+host.name+' wants $'+host.pick+', '+joiner.name+' wants $'+joiner.pick+'.';
+    else if(ps.every(p=>p.ready)){ text='Both ready. Entry '+feeOf(agreed)+' each.'; ok=true; }
+    else { text='Agreed on $'+agreed+'. Press Ready.'; ok=true; }
+  }
+  el.textContent=text;
+  el.classList.toggle('ok',ok);
+  el.style.display=text?'block':'none';
+}
+
+// Chat history from the server (kept for the room's life, across matches).
+function renderChat(chat){ if(!Array.isArray(chat)) return; document.getElementById('chat-msgs').innerHTML=''; chat.forEach(chatLine); }
+// A chat message, or a line the room itself wrote (e.g. "Sam changed the prize to $10").
+function chatLine(m){
+  if(!m) return;
+  if(!m.system) return addMsg(m.player,m.content);
+  const box=document.getElementById('chat-msgs'); const d=document.createElement('div'); d.className='chat-line chat-prize'; d.textContent='· '+m.content; box.appendChild(d); box.scrollTop=box.scrollHeight;
+}
+function renderRematch(){
+  const box=document.getElementById('rematch-box'), btn=document.getElementById('btn-rematch'), txt=document.getElementById('rematch-text');
+  const r=myRoom&&myRoom.rematch;
+  box.style.display=r?'block':'none';
+  if(!r) return;
+  const iPressed=(r.by||[]).includes(socket.id);
+  txt.textContent=iPressed?('Waiting for '+((r.waiting||[]).join(', ')||'your opponent')+' to accept…'):(((r.names||[]).join(', ')||'Your opponent')+' wants a rematch');
+  btn.style.display=iPressed?'none':'inline-block';
+}
+function updateActions() {
+  const btnReady=document.getElementById('btn-ready');
+  const btnStart=document.getElementById('btn-start');
+  renderRematch();
+  if(!myRoom) return;
+  // Pending rematch: no Ready/Start until both players have pressed Rematch.
+  if(myRoom.rematch){ btnReady.style.display='none'; btnStart.style.display='none'; return; }
+  // Entry fees on: READY is paying (amount from the shared prize table, the
+  // same one the server charges from); no Start — the match starts once both
+  // have paid. Open to both: READY waits until you both want the same prize.
+  if(myRoom.entryFees){
+    const pw=myRoom.payment, agreedNow=pw?pw.prize:agreedPrize(myRoom);
+    const me=(myRoom.players||[]).find(p=>p.id===socket.id);
+    const paid=!!(me && me.ready);
+    btnStart.style.display='none';
+    btnReady.style.display='inline-block';
+    btnReady.disabled=paid || !agreedNow || (myRoom.players||[]).length<2;
+    btnReady.title=!agreedNow?((myRoom.players||[]).length<2?'Waiting for an opponent':'Agree on a prize first'):'';
+    if(paid){ btnReady.textContent='✓ Ready · $'+agreedNow; btnReady.classList.add('is-ready'); }
+    else { btnReady.textContent=agreedNow?('READY · PAY '+feeOf(agreedNow)):'READY'; btnReady.classList.remove('is-ready'); }
+    renderPay();
+    return;
+  }
+  const players=myRoom.players||[];
+  const hasGuest=players.length===2;
+  // Ready (both players, host included) only once both want the same prize:
+  // pressing it accepts the prize showing. The host's Start unlocks once both
+  // are ready (the server enforces the same).
+  const agreed=agreedPrize(myRoom);
+  const allReady=hasGuest && !!agreed && players.every(p=>p.ready);
+  // Nobody starts a match for a player who isn't there (the server enforces it too).
+  const away=players.filter(p=>p.away).map(p=>p.name);
+  btnReady.style.display=agreed?'inline-block':'none';
+  btnStart.style.display=isMaster?'inline-block':'none';
+  btnStart.disabled=!allReady || away.length>0;
+  btnStart.title=away.length?('Waiting for '+away.join(', ')+' to come back'):allReady?'':(!hasGuest?'Waiting for an opponent':!agreed?'Agree on a prize first':'Waiting for both players to be ready');
+  if(isReady){ btnReady.textContent='✓ Ready'+(agreed?' · $'+agreed:''); btnReady.classList.add('is-ready'); }
+  else { btnReady.textContent='Ready?'+(agreed?' · $'+agreed:''); btnReady.classList.remove('is-ready'); }
+}
+
+function addMsg(player,content){ const box=document.getElementById('chat-msgs'); const d=document.createElement('div'); d.className='chat-line'; d.innerHTML=`<span class="chat-author">${player}:</span> ${content}`; box.appendChild(d); box.scrollTop=box.scrollHeight; }
+function sysMsg(text){ const box=document.getElementById('chat-msgs'); const d=document.createElement('div'); d.className='chat-line'; d.innerHTML=`<span class="chat-sys">· ${text}</span>`; box.appendChild(d); box.scrollTop=box.scrollHeight; }
+
+document.getElementById('btn-chat').onclick=sendChat;
+document.getElementById('chat-input').addEventListener('keydown',e=>{ if(e.key==='Enter') sendChat(); });
+function sendChat(){ const inp=document.getElementById('chat-input'); const content=inp.value.trim(); if(!content||!myRoom) return; socket.emit('room:talk',{content}); inp.value=''; }
+
+document.getElementById('btn-ready').onclick=()=>{
+  if(isReady || !myRoom) return;
+  // Entry fees on: Ready = pay — the server answers with this player's Checkout.
+  if(myRoom.entryFees){ status('Opening secure payment…','ok'); socket.emit('room:ready'); return; }
+  isReady=true; socket.emit('room:ready'); updateActions();
+};
+
+function kickPlayer(id){ if(myRoom && isMaster) socket.emit('room:kick',{id}); }
+
+document.getElementById('btn-start').onclick=()=>{
+  if((myRoom?.players||[]).length<2){status('Waiting for an opponent','err');return;}
+  socket.emit('room:launch');
+};
+
+document.getElementById('btn-leave').onclick=()=>{
+  socket.emit('room:leave');
+  remember(null);
+  myRoom=null; isMaster=false; isReady=false;
+  showList(); status('Left room','');
+};
+
+function setRoomType(isPublic){
+  roomIsPublic=isPublic;
+  document.getElementById('toggle-public').classList.toggle('active', isPublic);
+  document.getElementById('toggle-private').classList.toggle('active', !isPublic);
+  document.getElementById('modal-pass-field').style.display=isPublic?'none':'block';
+  if(!isPublic) setTimeout(()=>document.getElementById('modal-password').focus(),50);
+}
+document.getElementById('btn-create').onclick=()=>{
+  document.getElementById('modal-name').value='';
+  document.getElementById('modal-password').value='';
+  document.getElementById('create-error').textContent='';
+  setRoomType(true);
+  setCreatePrize(null);   // nothing preselected: the player must choose
+  closeJoinModal(); closePickModal();
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(()=>document.getElementById('modal-name').focus(),50);
+};
+function closeCreateModal(){ document.getElementById('modal-overlay').classList.remove('open'); }
+document.getElementById('btn-modal-cancel').onclick=closeCreateModal;
+document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target.id==='modal-overlay') closeCreateModal(); });
+document.getElementById('btn-modal-confirm').onclick=createRoom;
+document.getElementById('modal-name').addEventListener('keydown',e=>{ if(e.key==='Enter') createRoom(); });
+document.getElementById('modal-password').addEventListener('keydown',e=>{ if(e.key==='Enter') createRoom(); });
+function createRoom(){
+  const name=document.getElementById('modal-name').value.trim();
+  const password=roomIsPublic?'':document.getElementById('modal-password').value;
+  const err=document.getElementById('create-error');
+  if(!name){ err.textContent='Enter a room name'; return; }
+  if(!roomIsPublic && !password.trim()){ err.textContent='Enter a password for a private room'; return; }
+  if(!createPrizeMode){ err.textContent='Pick a prize first'; return; }
+  err.textContent='';
+  myRoomPassword=password;
+  socket.emit('room:create',{name,open:roomIsPublic,password,prizeMode:createPrizeMode});
+}
+let createPrizeMode=null;
+function setCreatePrize(mode){
+  createPrizeMode=mode;
+  document.querySelectorAll('#create-prize-opts .prize-opt').forEach(b=>b.classList.toggle('active', b.dataset.mode===mode));
+  const err=document.getElementById('create-error'); if(/prize/i.test(err.textContent)) err.textContent='';
+}
+document.querySelectorAll('#create-prize-opts .prize-opt').forEach(b=>{ b.onclick=()=>setCreatePrize(b.dataset.mode); });
+// Pick a prize (room open to both), then repeat the join with it.
+let pendingPick=null;
+function openPickModal(code,password){
+  closeJoinModal(); closeCreateModal();
+  pendingPick={code,password:password||''};
+  document.getElementById('pick-error').textContent='';
+  document.getElementById('pick-modal').classList.add('open');
+}
+function closePickModal(){ document.getElementById('pick-modal').classList.remove('open'); }
+document.querySelectorAll('#pick-modal [data-pick]').forEach(b=>{ b.onclick=()=>{
+  if(!pendingPick) return;
+  document.getElementById('pick-error').textContent='';
+  myRoomPassword=pendingPick.password;
+  socket.emit('room:join',{code:pendingPick.code,password:pendingPick.password,prize:Number(b.dataset.pick)});
+}; });
+document.getElementById('btn-pick-cancel').onclick=closePickModal;
+document.getElementById('pick-modal').addEventListener('click',e=>{ if(e.target.id==='pick-modal') closePickModal(); });
+
+document.getElementById('toggle-public').onclick=()=>setRoomType(true);
+document.getElementById('toggle-private').onclick=()=>setRoomType(false);
+
+document.getElementById('btn-joincode').onclick=joinByCode;
+document.getElementById('code-input').addEventListener('keydown',e=>{ if(e.key==='Enter') joinByCode(); });
+function joinByCode(){ const code=document.getElementById('code-input').value.trim(); const password=document.getElementById('join-password').value; if(!/^\d{4}$/.test(code)){ document.getElementById('join-error').textContent='Enter the 4-digit room code'; return; } document.getElementById('join-error').textContent=''; myRoomPassword=password; lastJoin={code,password}; socket.emit('room:join',{code,password}); }
+// Join with Code popup (same behaviour as Puz Royale's: opens on the button,
+// closes on Cancel / backdrop / a successful join; errors show inside it).
+// openJoinModal(code, true) = a private room clicked in the list: code filled in, asks for the password (as Puz).
+function openJoinModal(code, locked){
+  const pre=typeof code==='string'?code:'';
+  locked=!!locked && !!pre;
+  document.getElementById('join-title').textContent=locked?'JOIN PRIVATE ROOM':'JOIN WITH CODE';
+  document.getElementById('join-code-field').style.display=locked?'none':'block';
+  document.getElementById('join-pass-label').textContent=locked?'PASSWORD':'PASSWORD (PRIVATE ROOMS ONLY)';
+  document.getElementById('join-password').placeholder=locked?'Enter password':'Leave blank for public rooms';
+  document.getElementById('code-input').value=pre;
+  document.getElementById('join-password').value='';
+  document.getElementById('join-error').textContent='';
+  closeCreateModal();
+  document.getElementById('join-modal').classList.add('open');
+  setTimeout(()=>document.getElementById(locked?'join-password':'code-input').focus(),100);
+}
+function closeJoinModal(){ document.getElementById('join-modal').classList.remove('open'); }
+document.getElementById('btn-open-join').onclick=()=>openJoinModal();
+document.getElementById('join-password').addEventListener('keydown',e=>{ if(e.key==='Enter') joinByCode(); });
+document.getElementById('btn-join-cancel').onclick=closeJoinModal;
+document.getElementById('join-modal').addEventListener('click',e=>{ if(e.target.id==='join-modal') closeJoinModal(); });
+
+showList();
+</script>
+</body>
+</html>
