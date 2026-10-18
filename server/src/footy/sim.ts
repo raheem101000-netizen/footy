@@ -46,6 +46,36 @@ const BREAK_FRAMES = 400;
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
+/* ---------- kicks judged from the kicker's screen (like Pong's hits) ----------
+ * Your boot moves on your screen straight away, but the ball you see is a few
+ * frames old. When your boot touches the ball ON YOUR SCREEN, your page sends
+ * that moment (the frame it was showing for the ball) and the contact. The
+ * server checks it against its own record of that frame and, if it holds up,
+ * gives the ball the bounce it would have had then, flown forward to now —
+ * the same arithmetic your page used, so both agree. The pages use the exact
+ * same flight (no other bodies in the way for those few frames). */
+export const KICK_MAX_AGE = 12;          // frames: how old the ball you saw may be (0.4 s)
+export const KICK_REACH = 85;            // px from your head (at size 1)
+export const KICK_TIP_MAX = 900;         // px/s: fastest a boot can move
+export function kickFly(x: number, y: number, vx: number, vy: number, r: number, frames: number) {
+  for (let i = 0; i < frames * 3; i++) {
+    vy += 300 / 96; x += vx / 96; y += vy / 96;
+    if (x < 5 + r) { x = 5 + r; vx = Math.abs(vx); }
+    if (x > 795 - r) { x = 795 - r; vx = -Math.abs(vx); }
+    if (y < 5 + r) { y = 5 + r; vy = Math.abs(vy); }
+    if (y > 460 - r) { y = 460 - r; vy = -Math.abs(vy) * 0.6; }
+  }
+  return { x, y, vx, vy };
+}
+// The bounce off a boot moving at tip velocity (tvx, tvy) at contact point (cx, cy): the ball
+// leaves as off a wall moving with the boot (restitution 1, as the physics uses).
+export function kickBounce(bx: number, by: number, bvx: number, bvy: number, cx: number, cy: number, tvx: number, tvy: number) {
+  let nx = bx - cx, ny = by - cy; const d = Math.hypot(nx, ny) || 1; nx /= d; ny /= d;
+  const vn = (bvx - tvx) * nx + (bvy - tvy) * ny;
+  if (vn >= 0) return null;                                  // already moving away faster than the boot: no hit
+  return { vx: bvx - 2 * vn * nx, vy: bvy - 2 * vn * ny };
+}
+
 export function createSim() {
   const rand = Math.random;
   const Vec = (x: number, y: number) => pl.Vec2(x, y);
@@ -60,6 +90,11 @@ export function createSim() {
   let fx: any[] = [];
   let frame = 0;
   let pauseGame = true;
+  // per frame: the ball and both heads as sent to the pages (for judging kicks), and kick-key history
+  const hist: { f: number; b: number[] | null; R: number[] | null; L: number[] | null; kR: boolean; kL: boolean }[] = [];
+  const lastTouch: Record<Side, number> = { L: -99, R: -99 };
+  const lastClaim: Record<Side, number> = { L: -99, R: -99 };
+  let lastKickWhy = '';
   let result: { winner: Side; scoreL: number; scoreR: number } | null = null;
 
   const addTimeFunction = (frames: number, fn: () => void) => timeFns.push({ t: 0, frames, fn });
@@ -202,8 +237,8 @@ export function createSim() {
   function onContact(c: any) {
     const b2 = c.getFixtureA().getBody(), b3 = c.getFixtureB().getBody();
     const has = (a: any, b: any) => (b2 === a && b3 === b) || (b2 === b && b3 === a);
-    if (has(ball, racket) || has(ball, hero)) M.ballSender = 'hero';
-    if (has(ball, oppracket) || has(ball, opp)) M.ballSender = 'opp';
+    if (has(ball, racket) || has(ball, hero)) { M.ballSender = 'hero'; lastTouch.R = frame; }
+    if (has(ball, oppracket) || has(ball, opp)) { M.ballSender = 'opp'; lastTouch.L = frame; }
     if (b2 === ball || b3 === ball) {
       const wm = c.getWorldManifold(null), pt = wm && wm.points && wm.points[0];
       if (pt) {
@@ -370,6 +405,11 @@ export function createSim() {
     snd = []; fx = [];
     frame++;
     onFrame_game();
+    if (world) {
+      const sb = [...bodyState(ball), ...vel(ball)];
+      hist.push({ f: frame, b: sb, R: [...bodyState(hero), M.yourHeadScale], L: [...bodyState(opp), M.headsScale], kR: keys.R.kick, kL: keys.L.kick });
+    } else hist.push({ f: frame, b: null, R: null, L: null, kR: false, kL: false });
+    while (hist.length > KICK_MAX_AGE + 4) hist.shift();
     if (M.counter >= 2) { M.counter++; if (M.counter >= 90) { M.counter = 0; if (!result) pauseGame = false; } }
     const fns = timeFns; timeFns = [];
     for (const f of fns) { f.t++; if (f.t === f.frames) f.fn(); else timeFns.push(f); }
@@ -383,7 +423,7 @@ export function createSim() {
     return {
       f: frame,
       w: !!world,
-      b: world ? [...bodyState(ball), M.ballR, M.PUBouncy] : null,
+      b: world ? [...bodyState(ball), M.ballR, M.PUBouncy, ...vel(ball)] : null,
       // [x, y, angle] of head and boot, then head scale, boot scale, leg broken, frozen, bombed, speed, jump, head vx, vy
       R: world ? [...bodyState(hero), ...bodyState(racket), M.yourHeadScale, M.heroRacketScale, M.heroLegBroken ? 1 : 0, M.heroPUFreeze ? 1 : 0, M.heroBombed ? 1 : 0, M.heroPUSpeed, M.heroPUJump, ...vel(hero)] : null,
       L: world ? [...bodyState(opp), ...bodyState(oppracket), M.headsScale, M.oppRacketScale, M.oppLegBroken ? 1 : 0, M.oppPUFreeze ? 1 : 0, M.oppBombed ? 1 : 0, M.oppPUSpeed, M.oppPUJump, ...vel(opp)] : null,
@@ -402,12 +442,45 @@ export function createSim() {
   startMatch();
 
   return {
+    // A kick as the kicker saw it: the frame shown for the ball, the contact point on the boot
+    // and the boot's speed there. Returns true if it counted.
+    claimKick(side: Side, c: { f: number; cx: number; cy: number; tvx: number; tvy: number }) {
+      if (!world || pauseGame || M.inGoal || M.over || result) return (lastKickWhy = 'not in play', false);
+      const f = Math.round(Number(c?.f)), cx = Number(c?.cx), cy = Number(c?.cy);
+      let tvx = Number(c?.tvx), tvy = Number(c?.tvy);
+      if (![f, cx, cy, tvx, tvy].every(Number.isFinite)) return (lastKickWhy = 'bad data', false);
+      const age = frame - f;
+      if (age < 0 || age > KICK_MAX_AGE) return (lastKickWhy = 'too old', false);
+      if (frame - lastClaim[side] < 8) return (lastKickWhy = 'second claim in one swing', false);               // one kick per swing
+      if (lastTouch[side] >= f) return (lastKickWhy = 'server already had a touch', false);                       // the server already had this player touching the ball since then
+      const recent = hist.filter(h => h.f >= f - 2);
+      const kickHeld = keys[side].kick || recent.some(h => (side === 'R' ? h.kR : h.kL));
+      if (!kickHeld) return (lastKickWhy = 'kick key not held', false);
+      const H = hist.find(h => h.f === f);
+      if (!H || !H.b) return (lastKickWhy = 'no record of that frame', false);
+      const [bx, by, , bvx, bvy] = H.b, r = M.ballR;
+      if (Math.abs(Math.hypot(bx - cx, by - cy) - r) > 6) return (lastKickWhy = 'contact not on the ball', false);   // the contact must be on the ball as it was then
+      const heads = recent.map(h => h[side]).filter(Boolean) as number[][];
+      const sc = side === 'R' ? M.yourHeadScale : M.headsScale;
+      if (!heads.some(hd => Math.hypot(hd[0] - cx, hd[1] - cy) < KICK_REACH * sc)) return (lastKickWhy = 'out of reach', false);
+      const tip = Math.hypot(tvx, tvy);
+      if (tip > KICK_TIP_MAX) { tvx *= KICK_TIP_MAX / tip; tvy *= KICK_TIP_MAX / tip; }
+      const out = kickBounce(bx, by, bvx, bvy, cx, cy, tvx, tvy);
+      if (!out) return (lastKickWhy = 'ball moving away', false);
+      const now = kickFly(bx, by, out.vx, out.vy, r, age);
+      ball.setTransform(Vec(now.x, now.y), ball.getAngle()); ball.setLinearVelocity(Vec(now.vx, now.vy)); ball.setAwake(true);
+      M.ballSender = side === 'R' ? 'hero' : 'opp';
+      lastClaim[side] = frame; lastTouch[side] = frame; lastKickWhy = 'counted';
+      playSound('kickSound'); spawnRing(cx, cy);
+      return true;
+    },
     setKeys(side: Side, k: Partial<Keys>) {
       keys[side] = { left: !!k.left, right: !!k.right, jump: !!k.jump, kick: !!k.kick };
     },
     tick,
     snapshot,
     get result() { return result; },
+    get lastKickWhy() { return lastKickWhy; },
     get scores() { return { L: M.scoreLeft as number, R: M.scoreRight as number }; },
     // test hook
     _debug: () => ({ M, ball: ball && P(ball), hero: hero && P(hero), opp: opp && P(opp), pauseGame }),
