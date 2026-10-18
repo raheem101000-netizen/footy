@@ -376,6 +376,7 @@ export function createSim() {
   }
 
   const bodyState = (b: any) => { const p = P(b); return [r2(p.x), r2(p.y), r2(b.getAngle())]; };
+  const vel = (b: any) => { const v = Vl(b); return [r2(v.x), r2(v.y)]; };
 
   /** Everything a page needs to draw this frame. */
   function snapshot() {
@@ -383,9 +384,9 @@ export function createSim() {
       f: frame,
       w: !!world,
       b: world ? [...bodyState(ball), M.ballR, M.PUBouncy] : null,
-      // [x, y, angle] of head and boot, then head scale, boot scale, leg broken, frozen, bombed, speed, jump
-      R: world ? [...bodyState(hero), ...bodyState(racket), M.yourHeadScale, M.heroRacketScale, M.heroLegBroken ? 1 : 0, M.heroPUFreeze ? 1 : 0, M.heroBombed ? 1 : 0, M.heroPUSpeed, M.heroPUJump] : null,
-      L: world ? [...bodyState(opp), ...bodyState(oppracket), M.headsScale, M.oppRacketScale, M.oppLegBroken ? 1 : 0, M.oppPUFreeze ? 1 : 0, M.oppBombed ? 1 : 0, M.oppPUSpeed, M.oppPUJump] : null,
+      // [x, y, angle] of head and boot, then head scale, boot scale, leg broken, frozen, bombed, speed, jump, head vx, vy
+      R: world ? [...bodyState(hero), ...bodyState(racket), M.yourHeadScale, M.heroRacketScale, M.heroLegBroken ? 1 : 0, M.heroPUFreeze ? 1 : 0, M.heroBombed ? 1 : 0, M.heroPUSpeed, M.heroPUJump, ...vel(hero)] : null,
+      L: world ? [...bodyState(opp), ...bodyState(oppracket), M.headsScale, M.oppRacketScale, M.oppLegBroken ? 1 : 0, M.oppPUFreeze ? 1 : 0, M.oppBombed ? 1 : 0, M.oppPUSpeed, M.oppPUJump, ...vel(opp)] : null,
       st: world && streaker && M.streakerAlive ? bodyState(streaker).slice(0, 2) : null,
       pu: M.PUs.map((u: any) => [u.k, r2(u.x), r2(u.y), u.timer]),
       bm: M.bombs.map((b: any) => [r2(b.x), r2(b.y)]),
