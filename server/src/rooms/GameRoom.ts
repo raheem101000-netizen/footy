@@ -11,7 +11,13 @@ import { createSim, FootySim, Side, NO_KEYS } from "../footy/sim";
 const FRAME_MS = 1000 / 30;
 // Local tests only: delay every key message and every frame by this much, to feel a slow connection.
 const TEST_LAG_MS = Number(process.env.FOOTY_TEST_LAG_MS) || 0;
-const later = (fn: () => void) => (TEST_LAG_MS ? setTimeout(fn, TEST_LAG_MS) : fn());
+const TEST_JITTER_MS = Number(process.env.FOOTY_TEST_JITTER_MS) || 0;   // random extra delay, in order (like a real uneven connection)
+let testLastAt = 0;
+const later = (fn: () => void) => {
+  if (!TEST_LAG_MS && !TEST_JITTER_MS) { fn(); return; }
+  const now = Date.now(), at = Math.max(testLastAt, now + TEST_LAG_MS + Math.random() * TEST_JITTER_MS);
+  testLastAt = at; setTimeout(fn, at - now);
+};
 
 // ── Account-owned seats (same model as Pong's GameRoom / FIFA's FifaRoom) ────
 // A match seat belongs to the account: the same account on a new connection
