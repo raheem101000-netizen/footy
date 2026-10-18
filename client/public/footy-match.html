@@ -28,9 +28,29 @@ body{background:var(--night);color:var(--chalk);font-family:var(--ui);overflow:h
   background:rgba(20,16,0,.75);border:1px solid rgba(255,180,0,.6);color:#FFB400;white-space:nowrap;pointer-events:none;z-index:6}
 /* end of match (same flow as Pong's) */
 #result,#confirm{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse 70% 55% at 50% 0%,rgba(212,175,55,.16),transparent 70%),rgba(12,11,8,.9);z-index:10;text-align:center;gap:6px}
-#r-title{font:64px var(--display);text-shadow:0 4px 0 #0c2a14}
-#r-score{font:800 34px var(--ui);color:#fff;margin-bottom:6px}
-#r-credit{display:none;font:700 18px 'Space Grotesk',sans-serif;color:#4CFF6C;margin:2px 0 12px;max-width:560px}
+#result{overflow:hidden}
+#result.won{background:radial-gradient(ellipse 60% 55% at 50% 30%,rgba(212,175,55,.35),transparent 70%),rgba(8,7,5,.9)}
+#result > *{position:relative;z-index:1}
+#r-confetti{position:absolute!important;inset:0;z-index:0!important;pointer-events:none}
+#r-confetti i{position:absolute;width:8px;height:14px;border-radius:2px;opacity:.85;animation:fall linear infinite}
+@keyframes fall{from{transform:translateY(-60px) rotate(0)}to{transform:translateY(620px) rotate(540deg)}}
+@media (prefers-reduced-motion:reduce){#r-confetti i{animation:none}}
+#r-title{font:72px var(--display);text-shadow:0 5px 0 #000,0 0 24px rgba(212,175,55,.45)}
+#r-amt{display:none;font:64px var(--display);color:#fff;text-shadow:0 4px 0 #000;line-height:1}
+#r-credit{display:none;font:700 17px 'Space Grotesk',sans-serif;color:#f5e6b0;margin:6px 0 2px;max-width:560px}
+#r-score{font:800 22px var(--ui);color:rgba(255,255,255,.75);margin:6px 0 14px}
+.btn.gold{background:#d4af37;color:#1a1405}
+.btn.goldghost{background:transparent;color:#f5e6b0;border:1px solid rgba(212,175,55,.5)}
+/* kick-off splash */
+#splash{position:absolute;inset:0;z-index:8;display:none;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;
+  background:radial-gradient(ellipse 70% 60% at 50% 55%,rgba(212,175,55,.28),transparent 70%),rgba(8,7,5,.86)}
+#splash .row{display:flex;align-items:center;gap:34px}
+#splash .side{display:flex;flex-direction:column;align-items:center;width:230px}
+#splash canvas{width:186px;height:180px;image-rendering:pixelated;filter:drop-shadow(0 10px 14px rgba(0,0,0,.7))}
+#splash .nm{font:30px var(--display);color:#fff;margin-top:6px;text-shadow:0 3px 0 #000;max-width:230px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#splash .vs{font:96px var(--display);color:#d4af37;text-shadow:0 5px 0 #000,0 0 30px rgba(212,175,55,.6);margin-top:-40px}
+#splash .pz{margin-top:18px;font:800 26px var(--ui);letter-spacing:.12em;color:#1a1405;background:#d4af37;padding:6px 22px;border-radius:999px}
+#splash .ko{margin-top:12px;font:800 20px var(--ui);letter-spacing:.2em;color:#f5e6b0}
 .btn{font:800 22px var(--ui);letter-spacing:.03em;border:0;border-radius:9px;padding:9px 30px;cursor:pointer;margin:4px}
 .btn.green{background:#4CFF6C;color:#0d2a12}
 .btn.purple{background:#d4af37;color:#1a1405}
@@ -63,12 +83,22 @@ body{background:var(--night);color:var(--chalk);font-family:var(--ui);overflow:h
     <div id="c-msg">Quit the match? Quitting a live match is an instant loss.</div>
     <div><button class="btn ghost" id="c-no">Keep playing</button><button class="btn purple" id="c-yes" style="background:#e0332b;color:#fff">Quit and lose</button></div>
   </div>
+  <div id="splash">
+    <div class="row">
+      <div class="side"><canvas id="sp-lc" width="93" height="90"></canvas><div class="nm" id="sp-l"></div></div>
+      <div class="vs">VS</div>
+      <div class="side"><canvas id="sp-rc" width="93" height="90" style="transform:scaleX(-1)"></canvas><div class="nm" id="sp-r"></div></div>
+    </div>
+    <div class="pz" id="sp-pz"></div>
+    <div class="ko" id="sp-ko">KICK-OFF IN 3</div>
+  </div>
   <div id="result">
+    <div id="r-confetti"></div>
     <div id="r-title">YOU WIN!</div>
-    <div id="r-score">3 — 1</div>
+    <div id="r-amt"></div>
     <div id="r-credit"></div>
-    <button class="btn purple" id="btn-rematch" style="display:none">REMATCH</button>
-    <button class="btn green" id="btn-lobby">Back to Lobby</button>
+    <div id="r-score">3 — 1</div>
+    <div><button class="btn gold" id="btn-rematch" style="display:none">REMATCH</button><button class="btn goldghost" id="btn-lobby">Back to Lobby</button></div>
     <a class="back" href="https://tenten.run/">← TENTEN</a>
   </div>
 </div></div></div>
@@ -202,16 +232,16 @@ function connect() {
     matchOver = true; setConn(); hide('confirm');
     const iWon = (mySide === 'L' && d.winner === 'p1') || (mySide === 'R' && d.winner === 'p2');
     const mine = mySide === 'L' ? d.p1Score : d.p2Score, theirs = mySide === 'L' ? d.p2Score : d.p1Score;
-    let line = mine + ' — ' + theirs;
+    let line = mine + ' — ' + theirs + ' vs ' + oppName;
     if (d.forfeit) line = iWon ? oppName + ' quit the match' : 'You quit the match';
     else if (d.walkover) line = iWon ? 'Your opponent left the match' : 'You were away too long. ' + oppName + ' won.';
-    showResult(iWon ? 'YOU WIN!' : 'YOU LOSE!', iWon ? '#4CFF6C' : '#FF4444', line);
-    if (iWon) credit(matchPrize ? 'Adding your $' + matchPrize + ' prize…' : 'Adding your prize…', '#4CFF6C');
+    showResult(iWon ? 'YOU WIN!' : 'YOU LOSE!', iWon ? '#d4af37' : '#ff5a4f', line, iWon);
+    if (iWon) { amount(matchPrize ? '+$' + matchPrize : ''); credit('adding to your balance…', '#f5e6b0'); }
     if (!iWon && d.walkover) returnToLobbySoon();
   });
   socket.on('footymp:credit', (c) => {
-    if (c && c.status === 'credited') credit('You won! $' + c.amount + ' added to your balance', '#4CFF6C');
-    else if (c && c.status === 'disabled') credit("Cash prizes aren't live yet — no balance was credited for this win.", 'rgba(255,255,255,0.6)');
+    if (c && c.status === 'credited') { amount('+$' + c.amount); credit('added to your balance', '#f5e6b0'); }
+    else if (c && c.status === 'disabled') { amount(''); credit("Cash prizes aren't live yet — no balance was credited for this win.", 'rgba(255,255,255,0.6)'); }
     else credit("Your prize couldn't be added automatically — it's been logged and will be credited.", '#FFB400');
   });
   socket.on('rematch:available', () => {
@@ -234,12 +264,22 @@ function connect() {
 }
 function lobbyURL() { return '/rooms.html?name=' + encodeURIComponent(myName); }
 function hide(id) { document.getElementById(id).style.display = 'none'; }
-function showResult(title, color, line) {
+function showResult(title, color, line, won) {
   const t = document.getElementById('r-title'); t.textContent = title; t.style.color = color;
   document.getElementById('r-score').textContent = line;
   document.getElementById('r-credit').style.display = 'none';
-  document.getElementById('result').style.display = 'flex';
+  amount('');
+  const r = document.getElementById('result'), cf = document.getElementById('r-confetti');
+  r.classList.toggle('won', !!won); cf.innerHTML = '';
+  if (won) {   // confetti behind the words and buttons
+    const C = ['#d4af37', '#ffe9a3', '#ffffff', '#1d4fc4', '#d7261e'];
+    for (let i = 0; i < 70; i++) { const d = document.createElement('i'); d.style.left = (Math.random() * 800) + 'px'; d.style.top = (Math.random() * 540 - 540) + 'px';
+      d.style.background = C[i % 5]; d.style.animationDuration = (2.5 + Math.random() * 3) + 's'; d.style.animationDelay = (-Math.random() * 5) + 's'; cf.appendChild(d); }
+  }
+  hide('splash');
+  r.style.display = 'flex';
 }
+function amount(t) { const el = document.getElementById('r-amt'); el.textContent = t; el.style.display = t ? 'block' : 'none'; }
 function credit(text, color) { const el = document.getElementById('r-credit'); el.textContent = text; el.style.color = color; el.style.display = 'block'; }
 function returnToLobbySoon(seconds) {
   if (lobbyReturnTimer) return;
@@ -307,7 +347,7 @@ function buildPitch() {
   if (pitch) return pitch;
   const size = 3;
   const c = document.createElement('canvas'); c.width = 1600; c.height = 1080; const g = c.getContext('2d'); g.scale(2, 2);
-  let sk = g.createLinearGradient(0, 0, 0, 330); sk.addColorStop(0, '#6fb9de'); sk.addColorStop(1, '#cbe8f0'); g.fillStyle = sk; g.fillRect(0, 0, 800, 480);
+  let sk = g.createLinearGradient(0, 0, 0, 330); sk.addColorStop(0, '#05070f'); sk.addColorStop(1, '#1b2440'); g.fillStyle = sk; g.fillRect(0, 0, 800, 480);   // night sky
   const standTop = 150;
   g.fillStyle = '#e8ecef'; for (let x = 40; x < 800; x += 92) { g.fillRect(x, standTop - 95, 4, 95); g.beginPath(); g.moveTo(x - 4, standTop - 95); g.lineTo(x + 2, standTop - 120); g.lineTo(x + 8, standTop - 95); g.fill(); }
   g.fillStyle = '#d9dee2'; g.fillRect(0, standTop - 26, 800, 14); g.strokeStyle = '#c4cbd0'; g.lineWidth = 2; for (let x = 0; x < 800; x += 40) { g.beginPath(); g.moveTo(x, standTop - 12); g.lineTo(x + 40, standTop - 26); g.stroke(); }
@@ -318,8 +358,15 @@ function buildPitch() {
       if (rand() < .12) continue; g.fillStyle = shirts[getRand(shirts.length)]; g.fillRect(x - 3, y - 1, 6, 5); g.fillStyle = skins[getRand(skins.length)]; g.fillRect(x - 2, y - 5, 4, 4); }
     g.fillStyle = '#9fd8c2'; g.fillRect(0, y1 - 4, 800, 4);
   }
-  g.fillStyle = '#dfe5e8'; g.fillRect(0, 395, 800, 12);
-  const pg = g.createLinearGradient(0, 407, 0, 480); pg.addColorStop(0, '#62b04f'); pg.addColorStop(1, '#3f8f3c'); g.fillStyle = pg; g.fillRect(0, 407, 800, 73);
+  g.fillStyle = 'rgba(4,6,16,.42)'; g.fillRect(0, 100, 800, 300);                    // stands under lights
+  for (let i = 0; i < 60; i++) { g.fillStyle = 'rgba(255,255,255,' + (.5 + rand() * .5) + ')'; g.fillRect(rand() * 800, 150 + rand() * 245, 2, 2); }   // camera flashes
+  for (const fx of [70, 730]) {                                                       // floodlights
+    const lg = g.createRadialGradient(fx, 40, 4, fx, 40, 300); lg.addColorStop(0, 'rgba(255,248,220,.6)'); lg.addColorStop(.25, 'rgba(255,240,200,.18)'); lg.addColorStop(1, 'rgba(255,240,200,0)');
+    g.fillStyle = lg; g.fillRect(0, 0, 800, 480);
+    g.fillStyle = '#3a3f4a'; g.fillRect(fx - 3, 46, 6, 120); g.fillStyle = '#fffbe8'; g.fillRect(fx - 26, 26, 52, 18);
+    g.fillStyle = 'rgba(0,0,0,.35)'; for (let k = 0; k < 4; k++) g.fillRect(fx - 26 + k * 13, 26, 1, 18); }
+  g.fillStyle = '#cfd3c4'; g.fillRect(0, 395, 800, 12); g.fillStyle = '#d4af37'; g.fillRect(0, 398, 800, 3);
+  const pg = g.createLinearGradient(0, 407, 0, 480); pg.addColorStop(0, '#6cc457'); pg.addColorStop(1, '#2f7a2f'); g.fillStyle = pg; g.fillRect(0, 407, 800, 73);
   for (let i = 0; i < 10; i++) { g.fillStyle = i % 2 ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.04)'; const x0 = i * 80, k = .22;
     g.beginPath(); g.moveTo(x0, 407); g.lineTo(x0 + 80, 407); g.lineTo(x0 + 80 + (x0 + 80 - 400) * k, 480); g.lineTo(x0 + (x0 - 400) * k, 480); g.fill(); }
   g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 2;
@@ -439,6 +486,28 @@ function drawSpeaker(x, y, on, note) {
   if (!on) { ctx.strokeStyle = '#e0332b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x - 2, y + 8); ctx.lineTo(x + 13, y - 8); ctx.stroke(); }
 }
 
+/* ---------------- kick-off splash (before the first kick-off only) ---------------- */
+let splashDrawn = '';
+function updateSplash(v) {
+  const el = document.getElementById('splash');
+  const on = !!v && v.w && !matchOver && v.f < 90 && v.cnt >= 2;
+  el.style.display = on ? 'flex' : 'none';
+  if (!on) return;
+  // you on the right, the opponent on the left (same as the pitch); colours stay with the player
+  const myCol = mySide === 'R' ? 'blue' : 'red', oppCol = mySide === 'R' ? 'red' : 'blue';
+  const key = myName + '|' + oppName + '|' + mySide + '|' + matchPrize;
+  if (splashDrawn !== key) {
+    splashDrawn = key;
+    for (const [id, col] of [['sp-lc', oppCol], ['sp-rc', myCol]]) {
+      const c = document.getElementById(id), g = c.getContext('2d'), img = headImg(col);
+      g.clearRect(0, 0, c.width, c.height); g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, c.width, c.height);
+    }
+    document.getElementById('sp-l').textContent = oppName; document.getElementById('sp-r').textContent = myName;
+    document.getElementById('sp-pz').textContent = matchPrize ? '$' + Number(matchPrize) + ' PRIZE' : 'FOOTY 1v1';
+  }
+  document.getElementById('sp-ko').textContent = 'KICK-OFF IN ' + (v.cnt < 30 ? 3 : v.cnt < 60 ? 2 : 1);
+}
+
 /* ---------------- interpolation between server frames ---------------- */
 const lerp = (a, b, t) => a + (b - a) * t;
 const lerpA = (a, b, t) => { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return a + d * t; };
@@ -536,17 +605,19 @@ function draw(v) {
   const flash = v && v.fl < 18 && (v.fl < 6 || v.fl > 12);
   if (v && v.w) {
     if (v.gg) txt('GOLDEN GOAL', 400, 22, 24, '#ffcf3a', 'center', 5);
-    else { const tl = v.tl; const s = tl <= 0 ? '0:00' : Math.floor(tl / 60) + ':' + (tl % 60 < 10 ? '0' : '') + tl % 60; txt(s, 400, 22, 24, flash ? '#ff3b2f' : '#1d4d22', 'center'); }
+    else { const tl = v.tl; const s = tl <= 0 ? '0:00' : Math.floor(tl / 60) + ':' + (tl % 60 < 10 ? '0' : '') + tl % 60; txt(s, 400, 22, 24, flash ? '#ff3b2f' : '#f3f5ee', 'center'); }
   }
-  if (flash) txt('10 SECONDS LEFT', 400, 54, 30, '#ff3b2f', 'center', 6);
+  if (flash && !matchOver) txt('10 SECONDS LEFT', 400, 54, 30, '#ff3b2f', 'center', 6);
   drawBar();
   uiTxt('Arrows / WASD - Move', 12, 499, 18, '#f3f5ee', 'left', 128); uiTxt('Space / P - Kick', 12, 522, 18, '#f3f5ee', 'left', 128);
   uiTxt(v && v.gg ? 'Next goal wins!' : '1 minute · golden goal if level', 222, 510, 18, '#f3f5ee', 'center', 126);
   ctx.save(); ctx.beginPath(); ctx.rect(298, 485, 270, 51); ctx.clip(); txt('FOOTY', 433, 511, 34, '#ffcf3a', 'center'); ctx.restore();
   drawSpeaker(744, 499, AU.music, true); drawSpeaker(772, 499, AU.sfx, false);
+  updateSplash(v);
   if (!v) { txt(joined ? 'Waiting for ' + oppName + '…' : 'Connecting…', 400, 240, 40, '#ffffff', 'center', 7); return; }
+  if (matchOver) return;   // the result screen is up: no game words behind it
   const over = v.gw && v.gw.win;
-  if (!over && v.cnt >= 2 && v.cnt < 90) txt(String(v.cnt < 30 ? 3 : v.cnt < 60 ? 2 : 1), 400, 92, 64, '#ffffff', 'center', 8);
+  if (!over && v.cnt >= 2 && v.cnt < 90 && v.f >= 90) txt(String(v.cnt < 30 ? 3 : v.cnt < 60 ? 2 : 1), 400, 92, 64, '#ffffff', 'center', 8);
   if (v.tx && txT < 100) { ctx.globalAlpha = (100 - txT) / 100; txt(v.tx.text, 400, 196, 56, '#ffffff', 'center', 8); ctx.globalAlpha = 1; }
   if (v.mp && v.w && !over) txt('MATCH POINT', 400, 128, 26, '#ffcf3a', 'center', 5);
   if (v.gw) {
