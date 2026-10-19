@@ -263,7 +263,11 @@ let lastTx = 0, txT = 999, lastGw = 0, gwT = 0;
 const trail = [];
 
 function onSnap(s) {
-  if (snaps.length && s.f <= snaps[snaps.length - 1].f) snaps.length = 0;   // a new match restarted the frame count
+  if (snaps.length && s.f <= snaps[snaps.length - 1].f) {
+    // Each frame comes down two connections: a copy we already have (or an older frame) is ignored.
+    if (snaps[snaps.length - 1].f - s.f < 90) return;
+    snaps.length = 0;   // a new match restarted the frame count
+  }
   snaps.push(s);
   if (snaps.length > 90) snaps.splice(0, snaps.length - 90);
   // sounds and effects as they happen (skipped when a burst of late frames arrives together)
@@ -385,8 +389,29 @@ function sendKeys(force) {
   if (!socket || !socket.connected || matchOver) return;
   const k = keysNow(), sig = '' + +k.l + +k.r + +k.u + +k.k;
   if (!force && sig === lastSent) return;
-  lastSent = sig; socket.emit('in', k);
+  lastSent = sig; k.q = keyQ = Math.max(Date.now(), keyQ + 1);   // send order, so the server keeps only the newest copy
+  socket.emit('in', k);
+  if (twin) { try { twin.send('in', k); } catch (e) {} }
 }
+
+// ---- the twin connection (server: TwinRoom.ts) ----
+// A second connection to the server carrying the same frames and keys. On a shaky
+// Wi-Fi one connection stalls ~0.2 s whenever a piece of data is lost and must be
+// sent again; the other usually isn't stalled at that moment, so its copy fills in.
+let twin = null, twinBusy = false, keyQ = 0;
+function openTwin() {
+  if (twin || twinBusy || matchOver || !window.Colyseus || !auth) return;
+  twinBusy = true;
+  const c = new Colyseus.Client((location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host);
+  c.auth.token = auth.token;
+  c.joinOrCreate('twin_room', { room: roomFromURL, playerId: auth.playerId }).then(r => {
+    twinBusy = false; twin = r;
+    r.onMessage('s', onSnap); r.onMessage('*', () => {});
+    r.onLeave(() => { if (twin === r) twin = null; });
+    sendKeys(true);
+  }).catch(() => { twinBusy = false; });
+}
+setInterval(openTwin, 2000);
 addEventListener('keydown', e => {
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'].includes(e.code)) e.preventDefault();
   if (e.repeat) return; KEY[e.code] = true; sendKeys();
@@ -790,7 +815,7 @@ function draw(v) {
 fitRes();
 connect();
 requestAnimationFrame(t => { lastT = t; frame(t); });
-window.__footy = { snaps, get rtt() { return rtt; }, get delayF() { return delayF; }, get side() { return mySide; }, get res() { return RES; }, keysNow };   // test hook
+window.__footy = { snaps, get rtt() { return rtt; }, get delayF() { return delayF; }, get side() { return mySide; }, get res() { return RES; }, get twin() { return !!twin; }, keysNow };   // test hook
 })();
 </script>
 </body>

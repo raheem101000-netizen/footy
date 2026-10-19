@@ -7,6 +7,7 @@ import { migratePushSubscriptions } from "./pushNotifications";
 import { migrateMatchPayments, webhookHandler } from "./entryPayments";
 import { LobbyRoom } from "./rooms/LobbyRoom";
 import { GameRoom } from "./rooms/GameRoom";
+import { TwinRoom } from "./rooms/TwinRoom";
 import { prizesClientScript } from "./prizes";
 
 export const server = defineServer({
@@ -17,6 +18,7 @@ export const server = defineServer({
     rooms: {
         lobby_room: defineRoom(LobbyRoom),
         game_room:  defineRoom(GameRoom),
+        twin_room:  defineRoom(TwinRoom).filterBy(['room']),   // each player's second connection (TwinRoom.ts)
     },
 
     express: (app) => {
