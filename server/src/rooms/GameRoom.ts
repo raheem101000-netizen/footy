@@ -18,12 +18,19 @@ const SEAT_JIT = (process.env.FOOTY_TEST_SEAT_JITTER || '').split(',').map(Numbe
 const testLast: Record<string, number> = {};
 // Local tests only: a calm connection with a sudden hold-up of this many ms every 1.5–3 s (like Wi-Fi).
 const TEST_SPIKE_MS = Number(process.env.FOOTY_TEST_SPIKE_MS) || 0;
+const TEST_LOSS = Number(process.env.FOOTY_TEST_LOSS) || 0, TEST_LOSS_MODE = process.env.FOOTY_TEST_LOSS_MODE || 'tcp';
 let spikeAt = 0, spikeUntil = 0;
 // Hold fn back like a slow connection would, keeping order per path (key: which player and direction).
 const later = (fn: () => void, seat = -1, dir = 'x') => {
   const lag = seat >= 0 && SEAT_LAG[seat] ? SEAT_LAG[seat] : TEST_LAG_MS;
   const jit = seat >= 0 && SEAT_JIT[seat] ? SEAT_JIT[seat] : TEST_JITTER_MS;
-  if (!lag && !jit && !TEST_SPIKE_MS) { fn(); return; }
+  // Local tests only: lose this share of updates to the players. 'tcp' (today's connection type):
+  // everything behind a lost update waits for the re-send (~200 ms). 'udp': the lost update is skipped.
+  if (TEST_LOSS && dir !== 'in' && Math.random() < TEST_LOSS) {
+    if (TEST_LOSS_MODE === 'udp') return;
+    const key0 = seat + dir; testLast[key0] = Math.max(testLast[key0] || 0, Date.now() + 200);
+  }
+  if (!lag && !jit && !TEST_SPIKE_MS && !(TEST_LOSS && (testLast[seat + dir] || 0) > Date.now())) { fn(); return; }
   const key = seat + dir, now = Date.now();
   let at = Math.max(testLast[key] || 0, now + lag + Math.random() * jit);
   if (TEST_SPIKE_MS && dir !== 'in') {
