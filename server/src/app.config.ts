@@ -8,6 +8,7 @@ import { migrateMatchPayments, webhookHandler } from "./entryPayments";
 import { LobbyRoom } from "./rooms/LobbyRoom";
 import { GameRoom } from "./rooms/GameRoom";
 import { TwinRoom } from "./rooms/TwinRoom";
+import { netlogHandler } from "./netlog";
 import { prizesClientScript } from "./prizes";
 
 export const server = defineServer({
@@ -40,6 +41,9 @@ export const server = defineServer({
         });
 
         app.use("/colyseus", monitor());
+
+        // Connection recorder (netlog.ts) — test key only.
+        app.get("/netlog", netlogHandler);
 
         // The prize table (prizes.ts) for the lobby page — one source for labels and credits.
         app.get("/prizes.js", (_req, res) => {

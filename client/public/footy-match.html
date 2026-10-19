@@ -262,7 +262,32 @@ const effects = [];          // one-shot effects, animated here
 let lastTx = 0, txT = 999, lastGw = 0, gwT = 0;
 const trail = [];
 
-function onSnap(s) {
+// ---- connection recorder (server: netlog.ts) ----
+// Each connection's own arrivals, so a report can tell "one connection stalled
+// and another covered it" from "all connections went silent together".
+const linkGaps = {};   // link → [[time, gap], …]
+const linkLast = {};
+function linkSeen(link) {
+  const now = performance.now();
+  if (linkLast[link]) { (linkGaps[link] = linkGaps[link] || []).push([now, now - linkLast[link]]); if (linkGaps[link].length > 300) linkGaps[link].shift(); }
+  linkLast[link] = now;
+}
+const PAGE_VERSION = 'v18-diag';
+function netReport() {
+  const now = performance.now(), win = g => g.filter(x => x[0] > now - 5000).map(x => x[1]);
+  const m = win(netStat.gaps), r = a => Math.round(a);
+  const links = {};
+  for (const k in linkGaps) { const g = win(linkGaps[k]); links[k] = { n: g.length, s120: g.filter(x => x > 120).length, worst: r(g.length ? Math.max(...g) : 0) }; }
+  const scr = netStat.scr.map(x => x[1]);
+  return { v: PAGE_VERSION, side: mySide, frames: m.length, late60: m.filter(x => x > 60).length, stall120: m.filter(x => x > 120).length,
+    stall250: m.filter(x => x > 250).length, worst: r(m.length ? Math.max(...m) : 0), ping: r(rtt), up: 1 + twins.length, links,
+    fps: Math.round(scr.length / 3), slowest: r(scr.length ? Math.max(...scr) : 0), hidden: document.hidden, q: myQ,
+    ua: navigator.userAgent.replace(/^Mozilla\/5\.0 /, '').slice(0, 120) };
+}
+setInterval(() => { if (socket && socket.connected && snaps.length && !matchOver) socket.emit('diag', netReport()); }, 5000);
+
+function onSnap(s, link = 0) {
+  linkSeen(link);
   if (snaps.length && s.f <= snaps[snaps.length - 1].f) {
     // Each frame comes down two connections: a copy we already have (or an older frame) is ignored.
     if (snaps[snaps.length - 1].f - s.f < 90) return;
@@ -399,7 +424,7 @@ function sendKeys(force) {
 // Wi-Fi one connection stalls ~0.2 s whenever a piece of data is lost and must be
 // sent again; the other usually isn't stalled at that moment, so its copy fills in.
 const EXTRA_LINKS = Math.max(0, Math.min(3, Number(new URLSearchParams(location.search).get('links') || 3) - 1));
-let twins = [], twinBusy = false, keyQ = 0;
+let twins = [], twinBusy = false, keyQ = 0, twinCount = 0;
 function openTwin() {
   if (twins.length >= EXTRA_LINKS || twinBusy || matchOver || !window.Colyseus || !auth) return;
   twinBusy = true;
@@ -407,7 +432,7 @@ function openTwin() {
   c.auth.token = auth.token;
   c.joinOrCreate('twin_room', { room: roomFromURL, playerId: auth.playerId }).then(r => {
     twinBusy = false; twins.push(r);
-    r.onMessage('s', onSnap); r.onMessage('*', () => {});
+    const link = ++twinCount; r.onMessage('s', s => onSnap(s, link)); r.onMessage('*', () => {});
     r.onLeave(() => { twins = twins.filter(t => t !== r); });
     sendKeys(true); openTwin();
   }).catch(() => { twinBusy = false; });

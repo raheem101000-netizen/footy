@@ -5,6 +5,7 @@ import { creditFootyWin } from "../payouts";
 import { Prize, asPrize, prizeAmount, entryFeeFor } from "../prizes";
 import { createSim, FootySim, Side, NO_KEYS } from "../footy/sim";
 import { twinTargets, TwinTarget } from "./TwinRoom";
+import { recordNet } from "../netlog";
 
 // The match runs here, on the server, at the original game's 30 frames a
 // second (footy/sim.ts), and every frame goes to both players. The pages
@@ -229,6 +230,13 @@ export class GameRoom extends Room implements TwinTarget {
       client.send("hb");
       const slot = this.gameJoined.find(p => p.sessionId === client.sessionId);
       if (slot) this.touch(slot);
+    });
+
+    // Connection recorder (netlog.ts): what this player's page saw over the last 5 s.
+    this.onMessage("diag", (client: Client, d: any) => {
+      const p = this.gameJoined.find(x => x.sessionId === client.sessionId);
+      if (!p || !d || typeof d !== "object" || JSON.stringify(d).length > 3000) return;
+      recordNet({ t: new Date().toISOString(), room: this.roomId, name: p.name, userId: p.userId, ...d });
     });
 
     this.onMessage("nq", (client: Client, q: number) => {
