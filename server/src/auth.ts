@@ -1,4 +1,5 @@
 import { ServerError } from "@colyseus/core";
+import { createHash, timingSafeEqual } from "crypto";
 import { pool } from "./db";
 
 /**
@@ -18,10 +19,30 @@ export const TOKEN_MAX_AGE_HOURS = 12;
 export interface FootyAuth {
   userId: number;
   displayName: string;
+  testBot?: boolean;
+}
+
+/**
+ * Test bots (for automated test matches on the live server): two fixed players,
+ * "Test Bot A" (-1) and "Test Bot B" (-2), logged in with a secret key. Only the
+ * key's SHA-256 is here, so the key can't be read from the code. Bots are kept
+ * apart from real players (LobbyRoom: their rooms are hidden, they can't join
+ * real rooms and real players can't join theirs) and nothing about them is ever
+ * paid or credited (no entry fees, no win credit, no database rows).
+ */
+const TEST_BOT_KEY_SHA256 = "6acf3c3367ea68d2193de0185d9ac0146fd5f84ba8eb490f0077ea6dbcac7e6b";
+export const isTestBot = (userId: number) => userId === -1 || userId === -2;
+function testBotKeyOk(key: string): boolean {
+  const got = createHash("sha256").update(key).digest(), want = Buffer.from(TEST_BOT_KEY_SHA256, "hex");
+  return got.length === want.length && timingSafeEqual(got, want);
 }
 
 export async function authenticateGameToken(token: unknown, playerId: unknown): Promise<FootyAuth> {
   const userId = Number(playerId);
+  if (typeof token === "string" && token.startsWith("testbot:")) {
+    if (isTestBot(userId) && testBotKeyOk(token.slice(8))) return { userId, displayName: userId === -1 ? "Test Bot A" : "Test Bot B", testBot: true };
+    throw new ServerError(401, "Log in on tenten.run to play");
+  }
   if (typeof token !== "string" || !token || !Number.isInteger(userId) || userId <= 0) {
     throw new ServerError(401, "Log in on tenten.run to play");
   }
