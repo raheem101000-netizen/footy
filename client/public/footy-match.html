@@ -194,7 +194,7 @@ let renderF = null;
 // How far behind the newest frame everything is drawn: just enough to cover this connection's
 // unevenness (measured), so it's as small as the connection allows. Nothing is guessed: every
 // position on screen is one the server sent.
-let delayF = 1.4, lastArrive = 0, jitter = 6;
+let delayF = 2.2, lastArrive = 0, jitter = 6, recentGaps = [];
 let rtt = 80;                                   // ms, measured with ping (for the readout)
 const netStat = { gaps: [], show: /[?&]net=1/.test(location.search) };
 addEventListener('keydown', e => { if (e.code === 'KeyN') netStat.show = !netStat.show; });
@@ -208,9 +208,13 @@ function onSnap(s) {
   if (snaps.length > 90) snaps.splice(0, snaps.length - 90);
   // sounds and effects as they happen (skipped when a burst of late frames arrives together)
   s.at = performance.now();
-  if (lastArrive) { const gap = s.at - lastArrive; jitter += (Math.abs(gap - 1000 / 30) - jitter) * .05; netStat.gaps.push([s.at, gap]); }
+  if (lastArrive) { const gap = s.at - lastArrive; jitter += (Math.abs(gap - 1000 / 30) - jitter) * .05; netStat.gaps.push([s.at, gap]); if (netStat.gaps.length > 400) netStat.gaps.shift(); recentGaps.push(gap); if (recentGaps.length > 120) recentGaps.shift(); }
   lastArrive = s.at;
-  delayF = Math.max(1.1, Math.min(3, 1 + jitter * 1.6 / (1000 / 30)));
+  // Playback buffer: big enough to cover the worst late update of the last ~4 s,
+  // never below ~73 ms (the old setting), never above ~233 ms (only on a bad connection).
+  const worst = recentGaps.length ? Math.max(...recentGaps) : 33;
+  const want = Math.max(2.2, Math.min(7, worst / (1000 / 30) - 0.3));
+  delayF = want > delayF ? want : delayF + (want - delayF) * .01;   // grow at once, shrink slowly
   for (const n of s.snd) playSound(n);
   for (const e of s.fx) effects.push({ k: e[0], x: e[1], y: e[2], xs: e[3] || 0, ys: e[4] || 0, t: 0 });
   if (s.tx && s.tx.seq !== lastTx) { lastTx = s.tx.seq; txT = 0; }
@@ -584,16 +588,24 @@ function frame(now) {
   const newest = snaps.length ? snaps[snaps.length - 1].f : 0;
   if (renderF === null && snaps.length) renderF = newest - delayF;
   if (renderF !== null) {
-    renderF += dt * 30 / 1000;
     const target = newest - delayF;
     if (Math.abs(target - renderF) > 15) renderF = target;           // far off (tab was hidden): jump
-    else renderF += (target - renderF) * Math.min(1, dt / 400);      // drift gently toward the target
+    else {
+      // Play a little slower when the buffer runs low and a little faster when it's
+      // full — never stop dead and never leap, so a late update is a tiny slow-down
+      // instead of a freeze followed by a skip.
+      let rate = Math.max(0.8, Math.min(1.2, 1 + (target - renderF) * 0.12));
+      const left = newest - renderF;                                 // frames still in hand
+      if (left < 1) rate = Math.min(rate, 0.4 + left * 0.4);         // nearly out: ease off rather than stop dead
+      renderF += dt * 30 / 1000 * rate;
+    }
+    if (renderF > newest) renderF = newest;                          // never draw past the newest real frame
   }
   // effects advance at the game's 30 frames a second
   fxAcc += dt * 30 / 1000;
   while (fxAcc >= 1) { fxAcc -= 1; stepEffects(); }
   const view = smoothBoots(renderF === null ? null : viewAt(renderF), dt);
-  window.__view = view;   // what this screen is drawing (read by test players)
+  window.__view = view; window.__pb = [renderF, newest];   // what this screen is drawing (read by test players)
   draw(view);
   requestAnimationFrame(frame);
 }
