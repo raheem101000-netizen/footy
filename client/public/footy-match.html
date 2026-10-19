@@ -21,7 +21,7 @@ body{background:var(--night);color:var(--chalk);font-family:var(--ui);overflow:h
   padding-block:max(10px,env(safe-area-inset-top,0px)) max(10px,env(safe-area-inset-bottom,0px))}
 #box{position:relative}
 #stage{position:absolute;left:0;top:0;width:800px;height:540px;transform-origin:0 0;overflow:hidden;border-radius:6px;background:#11281a;box-shadow:0 18px 60px rgba(0,0,0,.6)}
-#cv{position:absolute;inset:0;width:800px;height:540px;display:block}
+#bg,#cv{position:absolute;inset:0;width:800px;height:540px;display:block}
 .hudbtn{position:absolute;font-family:var(--ui);font-weight:800;font-size:20px;color:#fff;background:none;border:0;cursor:pointer;padding:2px 6px}
 .icon{position:absolute;width:22px;height:22px;border:0;background:none;cursor:pointer;padding:0}
 #conn{position:absolute;left:50%;top:150px;transform:translateX(-50%);display:none;padding:7px 14px;border-radius:8px;font:700 15px var(--ui);letter-spacing:.04em;
@@ -68,6 +68,7 @@ body{background:var(--night);color:var(--chalk);font-family:var(--ui);overflow:h
 </head>
 <body>
 <div id="wrap"><div id="box"><div id="stage">
+  <canvas id="bg" width="1600" height="1080" aria-hidden="true"></canvas>
   <canvas id="cv" width="1600" height="1080" aria-label="FOOTY match"></canvas>
   <button class="hudbtn" id="gQuit" style="left:690px;top:510px" title="Quitting a live match is an instant loss">Quit</button>
   <button class="icon" id="gMus" style="left:742px;top:488px" aria-label="Crowd sound"></button>
@@ -117,7 +118,23 @@ function fit() {
   stage.style.transform = 'scale(' + k + ')'; box.style.width = 800 * k + 'px'; box.style.height = 540 * k + 'px';
 }
 addEventListener('resize', fit); fit();
-const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const cv = document.getElementById('cv');
+let ctx = cv.getContext('2d');
+// Two layers: everything that never moves (sky, stadium, crowd, pitch, bottom bar)
+// is drawn ONCE on the back canvas; the front canvas only redraws what moves.
+const bgCtx = document.getElementById('bg').getContext('2d');
+// Draw at the resolution the screen actually shows (up to 2x for sharp screens).
+// A non-Retina laptop gets 1x: a quarter of the pixel work, and it looks the same there.
+let RES = 2, bgKey = null;
+function fitRes() {
+  const k = parseFloat((stage.style.transform.match(/scale\(([\d.]+)\)/) || [])[1]) || 1;
+  const r = Math.max(1, Math.min(2, Math.ceil(k * (window.devicePixelRatio || 1) * 4) / 4));
+  if (r === RES && cv.width === 800 * r) return;
+  RES = r;
+  for (const c of [cv, bgCtx.canvas]) { c.width = 800 * r; c.height = 540 * r; }
+  bgKey = null;
+}
+addEventListener('resize', fitRes);
 const rand = Math.random, getRand = n => Math.floor(rand() * n);
 
 /* ---------------- the ape (same art as the single-player game) ---------------- */
@@ -616,13 +633,30 @@ function stepEffects() {
 }
 let trailTick = 0;
 
+function drawBackground() {
+  const key = mirrored() ? 'L' : 'R';
+  if (bgKey === key) return;
+  bgKey = key;
+  const front = ctx; ctx = bgCtx;
+  ctx.setTransform(RES, 0, 0, RES, 0, 0); ctx.imageSmoothingEnabled = true; ctx.clearRect(0, 0, 800, 540);
+  ctx.save(); if (key === 'L') { ctx.translate(800, 0); ctx.scale(-1, 1); }
+  ctx.drawImage(buildPitch(), 0, 0, 800, 540); ctx.restore();
+  drawBar();
+  uiTxt('Arrows / WASD - Move', 12, 499, 18, '#f3f5ee', 'left', 128); uiTxt('Space / P - Kick', 12, 522, 18, '#f3f5ee', 'left', 128);
+  ctx.save(); ctx.beginPath(); ctx.rect(298, 485, 270, 51); ctx.clip(); txt('FOOTY', 433, 511, 34, '#ffcf3a', 'center'); ctx.restore();
+  ctx = front;
+}
+// the bar's lettering uses a web font: draw the back layer again once it has loaded
+if (document.fonts) { document.fonts.ready.then(() => { bgKey = null; }); document.fonts.addEventListener && document.fonts.addEventListener('loadingdone', () => { bgKey = null; }); }
+
 function draw(v) {
-  ctx.setTransform(2, 0, 0, 2, 0, 0); ctx.imageSmoothingEnabled = true;
+  drawBackground();
+  ctx.setTransform(RES, 0, 0, RES, 0, 0); ctx.imageSmoothingEnabled = true;
+  ctx.clearRect(0, 0, 800, 540);   // the front layer only: the stadium behind stays as it is
   const mir = mirrored();
   // ---- the pitch and everything on it (mirrored for the left player) ----
   ctx.save();
   if (mir) { ctx.translate(800, 0); ctx.scale(-1, 1); }
-  ctx.drawImage(buildPitch(), 0, 0, 800, 540);
   if (v && v.w) {
     for (const u of v.pu) { ctx.globalAlpha = u[3] < 60 && (u[3] >> 2) % 2 ? .4 : 1; drawPUIcon(ctx, u[1], u[2], u[0], 1.5); ctx.globalAlpha = 1; }
     if (v.b && ++trailTick % 2 === 0) trail.push({ x: v.b[0], y: v.b[1], t: 0 });
@@ -663,10 +697,7 @@ function draw(v) {
     else { const tl = v.tl; const s = tl <= 0 ? '0:00' : Math.floor(tl / 60) + ':' + (tl % 60 < 10 ? '0' : '') + tl % 60; txt(s, 400, 22, 24, flash ? '#ff3b2f' : '#f3f5ee', 'center'); }
   }
   if (flash && !matchOver) txt('10 SECONDS LEFT', 400, 54, 30, '#ff3b2f', 'center', 6);
-  drawBar();
-  uiTxt('Arrows / WASD - Move', 12, 499, 18, '#f3f5ee', 'left', 128); uiTxt('Space / P - Kick', 12, 522, 18, '#f3f5ee', 'left', 128);
   uiTxt(v && v.gg ? 'Next goal wins!' : '1 minute · golden goal if level', 222, 510, 18, '#f3f5ee', 'center', 126);
-  ctx.save(); ctx.beginPath(); ctx.rect(298, 485, 270, 51); ctx.clip(); txt('FOOTY', 433, 511, 34, '#ffcf3a', 'center'); ctx.restore();
   drawSpeaker(744, 499, AU.music, true); drawSpeaker(772, 499, AU.sfx, false);
   updateSplash(v);
   if (netStat.show) {   // connection readout (press N)
@@ -692,9 +723,10 @@ function draw(v) {
   }
 }
 
+fitRes();
 connect();
 requestAnimationFrame(t => { lastT = t; frame(t); });
-window.__footy = { snaps, get rtt() { return rtt; }, get delayF() { return delayF; }, get side() { return mySide; }, keysNow };   // test hook
+window.__footy = { snaps, get rtt() { return rtt; }, get delayF() { return delayF; }, get side() { return mySide; }, get res() { return RES; }, keysNow };   // test hook
 })();
 </script>
 </body>
