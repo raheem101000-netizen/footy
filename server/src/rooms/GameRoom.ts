@@ -12,12 +12,19 @@ const FRAME_MS = 1000 / 30;
 // Local tests only: delay every key message and every frame by this much, to feel a slow connection.
 const TEST_LAG_MS = Number(process.env.FOOTY_TEST_LAG_MS) || 0;
 const TEST_JITTER_MS = Number(process.env.FOOTY_TEST_JITTER_MS) || 0;   // random extra delay, in order (like a real uneven connection)
-let testLastAt = 0;
-const later = (fn: () => void) => {
-  if (!TEST_LAG_MS && !TEST_JITTER_MS) { fn(); return; }
-  const now = Date.now(), at = Math.max(testLastAt, now + TEST_LAG_MS + Math.random() * TEST_JITTER_MS);
-  testLastAt = at; setTimeout(fn, at - now);
+// Per seat (local tests only): FOOTY_TEST_SEAT_LAG="40,10" FOOTY_TEST_SEAT_JITTER="20,0" — seat 0 (host) far, seat 1 near.
+const SEAT_LAG = (process.env.FOOTY_TEST_SEAT_LAG || '').split(',').map(Number);
+const SEAT_JIT = (process.env.FOOTY_TEST_SEAT_JITTER || '').split(',').map(Number);
+const testLast: Record<string, number> = {};
+// Hold fn back like a slow connection would, keeping order per path (key: which player and direction).
+const later = (fn: () => void, seat = -1, dir = 'x') => {
+  const lag = seat >= 0 && SEAT_LAG[seat] ? SEAT_LAG[seat] : TEST_LAG_MS;
+  const jit = seat >= 0 && SEAT_JIT[seat] ? SEAT_JIT[seat] : TEST_JITTER_MS;
+  if (!lag && !jit) { fn(); return; }
+  const key = seat + dir, now = Date.now(), at = Math.max(testLast[key] || 0, now + lag + Math.random() * jit);
+  testLast[key] = at; setTimeout(fn, at - now);
 };
+const PER_SEAT_TEST = SEAT_LAG.some(n => n > 0) || SEAT_JIT.some(n => n > 0);
 
 // ── Account-owned seats (same model as Pong's GameRoom / FIFA's FifaRoom) ────
 // A match seat belongs to the account: the same account on a new connection
@@ -168,7 +175,7 @@ export class GameRoom extends Room {
       this.touch(this.gameJoined[idx]);
       if (!this.sim || this.finalResult) return;
       const keys = { left: !!data?.l, right: !!data?.r, jump: !!data?.u, kick: !!data?.k };
-      later(() => { if (this.sim && !this.finalResult) this.sim.setKeys(SIDE_OF(idx), keys); });
+      later(() => { if (this.sim && !this.finalResult) this.sim.setKeys(SIDE_OF(idx), keys); }, idx, 'in');
     });
 
     // Quitting a live match is an instant loss (same rule as every 1v1 game).
@@ -204,7 +211,8 @@ export class GameRoom extends Room {
 
     this.onMessage("ping", (client: Client, data: { ts: number }) => {
       const ts = data?.ts;
-      later(() => later(() => client.send("pong", { ts })));   // test lag both ways, like the key messages and frames
+      const seat = this.gameJoined.findIndex(p => p.sessionId === client.sessionId);
+      later(() => later(() => client.send("pong", { ts }), seat, 'out'), seat, 'in');   // test lag both ways, like the key messages and frames
     });
   }
 
@@ -357,7 +365,9 @@ export class GameRoom extends Room {
       let n = 0;
       while (Date.now() >= next && n < 5) {
         sim.tick();
-        { const snap = sim.snapshot(); later(() => this.broadcast('s', snap)); }
+        { const snap = sim.snapshot();
+          if (PER_SEAT_TEST) this.gameJoined.forEach((p, seat) => later(() => this.clients.find(c => c.sessionId === p.sessionId)?.send('s', snap), seat, 'out'));
+          else later(() => this.broadcast('s', snap)); }
         next += FRAME_MS; n++;
         if (sim.result) {
           const r = sim.result;
