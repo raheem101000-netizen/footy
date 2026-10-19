@@ -4,6 +4,7 @@ import { consumeLaunchTicket } from "../launchTickets";
 import { creditFootyWin } from "../payouts";
 import { Prize, asPrize, prizeAmount, entryFeeFor } from "../prizes";
 import { createSim, FootySim, Side, NO_KEYS } from "../footy/sim";
+import { twinTargets, TwinTarget } from "./TwinRoom";
 
 // The match runs here, on the server, at the original game's 30 frames a
 // second (footy/sim.ts), and every frame goes to both players. The pages
@@ -26,8 +27,8 @@ const later = (fn: () => void, seat = -1, dir = 'x') => {
   const jit = seat >= 0 && SEAT_JIT[seat] ? SEAT_JIT[seat] : TEST_JITTER_MS;
   // Local tests only: lose this share of updates to the players. 'tcp' (today's connection type):
   // everything behind a lost update waits for the re-send (~200 ms). 'udp': the lost update is skipped.
-  if (TEST_LOSS && dir !== 'in' && Math.random() < TEST_LOSS) {
-    if (TEST_LOSS_MODE === 'udp') return;
+  if (TEST_LOSS && Math.random() < TEST_LOSS) {
+    if (TEST_LOSS_MODE === 'udp' && dir !== 'in' && dir !== 'tin') return;
     const key0 = seat + dir; testLast[key0] = Math.max(testLast[key0] || 0, Date.now() + 200);
   }
   if (!lag && !jit && !TEST_SPIKE_MS && !(TEST_LOSS && (testLast[seat + dir] || 0) > Date.now())) { fn(); return; }
@@ -73,7 +74,7 @@ interface PlayerSlot { sessionId: string; bid: string | null; name: string; user
 // draws itself on the right in blue (the left player's page is mirrored).
 const SIDE_OF = (idx: number): Side => (idx === 0 ? 'L' : 'R');
 
-export class GameRoom extends Room {
+export class GameRoom extends Room implements TwinTarget {
   // Two seats, with spare connection headroom so a player's own replacement
   // connection is never refused as "full".
   maxClients = 10;
@@ -85,6 +86,9 @@ export class GameRoom extends Room {
   // shared with both players so everyone can see whose connection is struggling.
   private netQ: Record<Side, { q: number; at: number }> = { L: { q: 0, at: 0 }, R: { q: 0, at: 0 } };
   private netSent = '';
+  // Each player's twin connection (TwinRoom.ts): frames go down both, keys come up both.
+  private twins: { client: Client; userId: number }[] = [];
+  private keySeq = [0, 0];   // newest key message seen per seat (the twin copy may arrive first)
   private sim: FootySim | null = null;
   private loop: ReturnType<typeof setInterval> | null = null;
   private allowedUserIds: number[] = [];
@@ -126,6 +130,7 @@ export class GameRoom extends Room {
     this.entriesCharged = options?.entriesCharged === true;
     this.setMetadata({ over: false });
     this.sweepTimer = setInterval(() => this.sweep(), SWEEP_MS);
+    twinTargets.set(this.roomId, this);
 
     this.onMessage("joinRoom", (client: Client, data: { code?: string; name?: string; bid?: string }) => {
       // Identity comes from the login token (onAuth), never from the client.
@@ -192,10 +197,7 @@ export class GameRoom extends Room {
     this.onMessage("in", (client: Client, data: any) => {
       const idx = this.gameJoined.findIndex(p => p.sessionId === client.sessionId);
       if (idx === -1) return;
-      this.touch(this.gameJoined[idx]);
-      if (!this.sim || this.finalResult) return;
-      const keys = { left: !!data?.l, right: !!data?.r, jump: !!data?.u, kick: !!data?.k };
-      later(() => { if (this.sim && !this.finalResult) this.sim.setKeys(SIDE_OF(idx), keys); }, idx, 'in');
+      this.applyKeys(idx, data, 'in');
     });
 
     // Quitting a live match is an instant loss (same rule as every 1v1 game).
@@ -274,6 +276,7 @@ export class GameRoom extends Room {
   }
 
   onDispose() {
+    twinTargets.delete(this.roomId);
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.stopLoop();
     if (this.lobbyRoomId) matchMaker.remoteRoomCall(this.lobbyRoomId, 'matchClosed' as any, [this.roomId]).catch(() => {});
@@ -325,6 +328,23 @@ export class GameRoom extends Room {
   // once no seat has been held for MATCH_SEAT_HOLD_MS.
   // Both players' connection quality to both screens (only when it changes). A player whose
   // page has gone quiet for over 3 s counts as bad — their own report can't get through.
+  // Keys from either connection; an older copy (q = the page's send order) is ignored.
+  private applyKeys(idx: number, data: any, path: string) {
+    const q = Number(data?.q);
+    if (q) { if (q <= this.keySeq[idx]) return; this.keySeq[idx] = q; }
+    this.touch(this.gameJoined[idx]);
+    if (!this.sim || this.finalResult) return;
+    const keys = { left: !!data?.l, right: !!data?.r, jump: !!data?.u, kick: !!data?.k };
+    later(() => { if (this.sim && !this.finalResult) this.sim.setKeys(SIDE_OF(idx), keys); }, idx, path);
+  }
+  isPlayer(userId: number) { return this.allowedUserIds.includes(userId); }
+  keysFromTwin(userId: number, data: any) {
+    const idx = this.gameJoined.findIndex(p => p.userId === userId);
+    if (idx !== -1) this.applyKeys(idx, data, 'tin');
+  }
+  addTwin(client: Client, userId: number) { this.twins = this.twins.filter(t => t.userId !== userId); this.twins.push({ client, userId }); }
+  removeTwin(client: Client) { this.twins = this.twins.filter(t => t.client !== client); }
+
   private sendNetQ() {
     const now = Date.now(), cur = (s: Side) => (this.netQ[s].at && now - this.netQ[s].at > 3000 ? 2 : this.netQ[s].q);
     const msg = { L: cur('L'), R: cur('R') }, key = msg.L + ',' + msg.R;
@@ -404,7 +424,11 @@ export class GameRoom extends Room {
         sim.tick();
         { const snap = sim.snapshot();
           if (PER_SEAT_TEST) this.gameJoined.forEach((p, seat) => later(() => this.clients.find(c => c.sessionId === p.sessionId)?.send('s', snap), seat, 'out'));
-          else later(() => this.broadcast('s', snap)); }
+          else later(() => this.broadcast('s', snap));
+          for (const t of this.twins) {   // the same frame down each player's twin connection
+            const seat = this.gameJoined.findIndex(p => p.userId === t.userId);
+            later(() => t.client.send('s', snap), seat, 'tw');
+          } }
         next += FRAME_MS; n++;
         if (sim.result) {
           const r = sim.result;
