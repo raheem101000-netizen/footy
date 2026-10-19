@@ -342,7 +342,11 @@ export class GameRoom extends Room implements TwinTarget {
     const idx = this.gameJoined.findIndex(p => p.userId === userId);
     if (idx !== -1) this.applyKeys(idx, data, 'tin');
   }
-  addTwin(client: Client, userId: number) { this.twins = this.twins.filter(t => t.userId !== userId); this.twins.push({ client, userId }); }
+  addTwin(client: Client, userId: number) {
+    this.twins.push({ client, userId });
+    const mine = this.twins.filter(t => t.userId === userId);
+    if (mine.length > 3) this.twins = this.twins.filter(t => t !== mine[0]);   // at most 3 extra per player
+  }
   removeTwin(client: Client) { this.twins = this.twins.filter(t => t.client !== client); }
 
   private sendNetQ() {
@@ -427,7 +431,7 @@ export class GameRoom extends Room implements TwinTarget {
           else later(() => this.broadcast('s', snap));
           for (const t of this.twins) {   // the same frame down each player's twin connection
             const seat = this.gameJoined.findIndex(p => p.userId === t.userId);
-            later(() => t.client.send('s', snap), seat, 'tw');
+            later(() => t.client.send('s', snap), seat, 'tw' + t.client.sessionId);
           } }
         next += FRAME_MS; n++;
         if (sim.result) {

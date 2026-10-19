@@ -391,24 +391,25 @@ function sendKeys(force) {
   if (!force && sig === lastSent) return;
   lastSent = sig; k.q = keyQ = Math.max(Date.now(), keyQ + 1);   // send order, so the server keeps only the newest copy
   socket.emit('in', k);
-  if (twin) { try { twin.send('in', k); } catch (e) {} }
+  for (const t of twins) { try { t.send('in', k); } catch (e) {} }
 }
 
 // ---- the twin connection (server: TwinRoom.ts) ----
 // A second connection to the server carrying the same frames and keys. On a shaky
 // Wi-Fi one connection stalls ~0.2 s whenever a piece of data is lost and must be
 // sent again; the other usually isn't stalled at that moment, so its copy fills in.
-let twin = null, twinBusy = false, keyQ = 0;
+const EXTRA_LINKS = Math.max(0, Math.min(3, Number(new URLSearchParams(location.search).get('links') || 3) - 1));
+let twins = [], twinBusy = false, keyQ = 0;
 function openTwin() {
-  if (twin || twinBusy || matchOver || !window.Colyseus || !auth) return;
+  if (twins.length >= EXTRA_LINKS || twinBusy || matchOver || !window.Colyseus || !auth) return;
   twinBusy = true;
   const c = new Colyseus.Client((location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host);
   c.auth.token = auth.token;
   c.joinOrCreate('twin_room', { room: roomFromURL, playerId: auth.playerId }).then(r => {
-    twinBusy = false; twin = r;
+    twinBusy = false; twins.push(r);
     r.onMessage('s', onSnap); r.onMessage('*', () => {});
-    r.onLeave(() => { if (twin === r) twin = null; });
-    sendKeys(true);
+    r.onLeave(() => { twins = twins.filter(t => t !== r); });
+    sendKeys(true); openTwin();
   }).catch(() => { twinBusy = false; });
 }
 setInterval(openTwin, 2000);
@@ -815,7 +816,7 @@ function draw(v) {
 fitRes();
 connect();
 requestAnimationFrame(t => { lastT = t; frame(t); });
-window.__footy = { snaps, get rtt() { return rtt; }, get delayF() { return delayF; }, get side() { return mySide; }, get res() { return RES; }, get twin() { return !!twin; }, keysNow };   // test hook
+window.__footy = { snaps, get rtt() { return rtt; }, get delayF() { return delayF; }, get side() { return mySide; }, get res() { return RES; }, get twin() { return twins.length; }, keysNow };   // test hook
 })();
 </script>
 </body>
