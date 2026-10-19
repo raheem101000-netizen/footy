@@ -74,6 +74,10 @@ export class GameRoom extends Room {
   autoDispose = false;
 
   private gameJoined: PlayerSlot[] = [];
+  // Each player's connection quality as their own page measures it (0 good, 1 weak, 2 bad),
+  // shared with both players so everyone can see whose connection is struggling.
+  private netQ: Record<Side, { q: number; at: number }> = { L: { q: 0, at: 0 }, R: { q: 0, at: 0 } };
+  private netSent = '';
   private sim: FootySim | null = null;
   private loop: ReturnType<typeof setInterval> | null = null;
   private allowedUserIds: number[] = [];
@@ -146,6 +150,7 @@ export class GameRoom extends Room {
         this.sendJoined(client, idx, name);
         const other = this.gameJoined[idx === 0 ? 1 : 0];
         if (other) client.send('opponentName', { name: other.name });
+        client.send('nq', { L: this.netQ.L.q, R: this.netQ.R.q });   // a returning page gets the current signals
         this.sendPresence(client);
         // Back after the match was decided without them: show the result.
         if (this.finalResult || this.abandoned) this.markResultSeen(auth.userId);
@@ -215,6 +220,13 @@ export class GameRoom extends Room {
       client.send("hb");
       const slot = this.gameJoined.find(p => p.sessionId === client.sessionId);
       if (slot) this.touch(slot);
+    });
+
+    this.onMessage("nq", (client: Client, q: number) => {
+      const idx = this.gameJoined.findIndex(p => p.sessionId === client.sessionId);
+      if (idx === -1) return;
+      this.netQ[SIDE_OF(idx)] = { q: Math.max(0, Math.min(2, Math.round(Number(q) || 0))), at: Date.now() };
+      this.sendNetQ();
     });
 
     this.onMessage("ping", (client: Client, data: { ts: number }) => {
@@ -304,8 +316,18 @@ export class GameRoom extends Room {
   // Presence check: quiet seats show as away; a player away too long during
   // play loses by walkover (or play stops if both are gone); the room closes
   // once no seat has been held for MATCH_SEAT_HOLD_MS.
+  // Both players' connection quality to both screens (only when it changes). A player whose
+  // page has gone quiet for over 3 s counts as bad — their own report can't get through.
+  private sendNetQ() {
+    const now = Date.now(), cur = (s: Side) => (this.netQ[s].at && now - this.netQ[s].at > 3000 ? 2 : this.netQ[s].q);
+    const msg = { L: cur('L'), R: cur('R') }, key = msg.L + ',' + msg.R;
+    if (key === this.netSent) return;
+    this.netSent = key; this.broadcast('nq', msg);
+  }
+
   private sweep() {
     const now = Date.now();
+    this.sendNetQ();
     let changed = false;
     this.gameJoined.forEach((slot, idx) => {
       if (!slot.away && (!slot.connected || now - slot.lastSeen > AWAY_AFTER_MS)) {
