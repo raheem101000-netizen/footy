@@ -59,6 +59,10 @@ export function createSim() {
   let snd: string[] = [];
   let fx: any[] = [];
   let frame = 0;
+  // The boots part-way through this frame: the physics works each frame out in 3 steps of 1/96 s;
+  // the boot after steps 1 and 2 ([x, y, angle] × 2 per side) lets the pages draw the whole swing,
+  // even when a boot moves a long way in one frame (a fast kick or the whip back after one).
+  let bootSub: { R: number[]; L: number[] } | null = null;
   let pauseGame = true;
   let result: { winner: Side; scoreL: number; scoreR: number } | null = null;
 
@@ -186,7 +190,12 @@ export function createSim() {
     M.PUTimer++;
     if (M.PUTimer > 200) { spawnPU(); M.PUTimer = 0; }
     flasherUpdate(); PUCollisions(); PHUpdate(); bombsUpdate();
-    for (let i = 0; i < 3; i++) world.step(1 / 96, 48, 48);
+    const subR: number[] = [], subL: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      world.step(1 / 96, 48, 48);
+      if (i < 2) { subR.push(...bodyState(racket)); subL.push(...bodyState(oppracket)); }
+    }
+    bootSub = { R: subR, L: subL };
     checkWinPoint();
     if (M.timeMode && !M.suddenDeath && M.timeLeft > 0) {
       M.timeLeftBitch++;
@@ -367,7 +376,7 @@ export function createSim() {
 
   /* ---------- the frame (tick) ---------- */
   function tick() {
-    snd = []; fx = [];
+    snd = []; fx = []; bootSub = null;
     frame++;
     onFrame_game();
     if (M.counter >= 2) { M.counter++; if (M.counter >= 90) { M.counter = 0; if (!result) pauseGame = false; } }
@@ -385,6 +394,7 @@ export function createSim() {
       b: world ? [...bodyState(ball), M.ballR, M.PUBouncy] : null,
       // [x, y, angle] of head and boot, then head scale, boot scale, leg broken, frozen, bombed, speed, jump
       R: world ? [...bodyState(hero), ...bodyState(racket), M.yourHeadScale, M.heroRacketScale, M.heroLegBroken ? 1 : 0, M.heroPUFreeze ? 1 : 0, M.heroBombed ? 1 : 0, M.heroPUSpeed, M.heroPUJump] : null,
+      bs: world && bootSub ? bootSub : null,
       L: world ? [...bodyState(opp), ...bodyState(oppracket), M.headsScale, M.oppRacketScale, M.oppLegBroken ? 1 : 0, M.oppPUFreeze ? 1 : 0, M.oppBombed ? 1 : 0, M.oppPUSpeed, M.oppPUJump] : null,
       st: world && streaker && M.streakerAlive ? bodyState(streaker).slice(0, 2) : null,
       pu: M.PUs.map((u: any) => [u.k, r2(u.x), r2(u.y), u.timer]),

@@ -538,9 +538,45 @@ function viewAt(f) {
   let i = snaps.length - 2; while (i > 0 && snaps[i].f > f) i--;
   const A = snaps[i], B = snaps[i + 1], t = (f - A.f) / (B.f - A.f);
   if (!A.w || !B.w) return B;
-  return Object.assign({}, B, { b: lerpBody(A.b, B.b, t), L: lerpBody(A.L, B.L, t), R: lerpBody(A.R, B.R, t),
+  const L = lerpBody(A.L, B.L, t), R = lerpBody(A.R, B.R, t);
+  // Boots: through the server's own in-between positions (3 per frame), so the whole swing shows.
+  if (B.bs) for (const [side, P] of [['L', L], ['R', R]]) {
+    const a0 = A[side], b1 = B[side], sub = B.bs[side];
+    if (!a0 || !b1 || !sub || sub.length < 6 || P === b1) continue;
+    const pts = [[a0[3], a0[4], a0[5]], [sub[0], sub[1], sub[2]], [sub[3], sub[4], sub[5]], [b1[3], b1[4], b1[5]]];
+    const k = Math.min(2, Math.floor(t * 3)), u = t * 3 - k, p0 = pts[k], p1 = pts[k + 1];
+    P[3] = lerp(p0[0], p1[0], u); P[4] = lerp(p0[1], p1[1], u); P[5] = lerpA(p0[2], p1[2], u);
+  }
+  return Object.assign({}, B, { b: lerpBody(A.b, B.b, t), L, R,
     st: A.st && B.st ? [lerp(A.st[0], B.st[0], t), lerp(A.st[1], B.st[1], t)] : B.st });
 }
+
+// Boots never jump: the drawn boot follows the server's boot but moves at most a small step per
+// screen frame, so a big move in one server frame (the fast whip back after a kick, or two frames
+// arriving together) is drawn through the middle of the swing over the next 2-3 screen frames.
+// Drawing only — the server's boot still decides every touch.
+const BOOT_OFF = { R: 3.09, L: 0.05 };          // where the boot sits around the head, for its angle
+const BOOT_STEP = 0.3;                          // most a boot turns in one 60 Hz screen frame (a normal swing is ~0.26)
+const shownBoot = { L: null, R: null };
+function smoothBoots(v, dt) {
+  if (!v || !v.w) { shownBoot.L = shownBoot.R = null; return v; }
+  const out = Object.assign({}, v);
+  for (const side of ['L', 'R']) {
+    const P = v[side]; if (!P) continue;
+    const target = P[5];
+    let a = shownBoot[side];
+    if (a === null || Math.abs(wrapA(target - a)) > 2.6) a = target;     // first frame or a kick-off reset: no animation
+    else { const d = wrapA(target - a), m = BOOT_STEP * Math.max(1, dt / (1000 / 60)); a = Math.abs(d) <= m ? target : a + Math.sign(d) * m; }
+    shownBoot[side] = a;
+    if (a !== target) {
+      const Q = P.slice(), phi = a + BOOT_OFF[side], r = Math.hypot(P[3] - P[0], P[4] - P[1]) || 16.1 * P[7];
+      Q[3] = P[0] + Math.cos(phi) * r; Q[4] = P[1] + Math.sin(phi) * r; Q[5] = a;
+      out[side] = Q;
+    }
+  }
+  return out;
+}
+const wrapA = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
 
 let lastT = performance.now(), fxAcc = 0;
 function frame(now) {
@@ -556,7 +592,7 @@ function frame(now) {
   // effects advance at the game's 30 frames a second
   fxAcc += dt * 30 / 1000;
   while (fxAcc >= 1) { fxAcc -= 1; stepEffects(); }
-  const view = renderF === null ? null : viewAt(renderF);
+  const view = smoothBoots(renderF === null ? null : viewAt(renderF), dt);
   window.__view = view;   // what this screen is drawing (read by test players)
   draw(view);
   requestAnimationFrame(frame);
