@@ -197,7 +197,7 @@ let renderF = null;
 const delayF = 2.2;   // playback runs ~73 ms behind the newest frame (the setting from when nobody felt lag)
 let lastArrive = 0, jitter = 6;
 let rtt = 80;                                   // ms, measured with ping (for the readout)
-const netStat = { gaps: [], show: /[?&]net=1/.test(location.search) };
+const netStat = { gaps: [], scr: [], show: /[?&]net=1/.test(location.search) };
 addEventListener('keydown', e => { if (e.code === 'KeyN') netStat.show = !netStat.show; });
 const effects = [];          // one-shot effects, animated here
 let lastTx = 0, txT = 999, lastGw = 0, gwT = 0;
@@ -580,6 +580,7 @@ const wrapA = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) 
 
 let lastT = performance.now(), fxAcc = 0;
 function frame(now) {
+  netStat.scr.push([now, now - lastT]); while (netStat.scr.length && netStat.scr[0][0] < now - 3000) netStat.scr.shift();
   const dt = Math.min(250, now - lastT); lastT = now;
   const newest = snaps.length ? snaps[snaps.length - 1].f : 0;
   if (renderF === null && snaps.length) renderF = newest - delayF;
@@ -672,8 +673,9 @@ function draw(v) {
     const now = performance.now(); while (netStat.gaps.length && netStat.gaps[0][0] < now - 3000) netStat.gaps.shift();
     const gaps = netStat.gaps.map(g => g[1]), late = gaps.filter(g => g > 60).length, maxGap = gaps.length ? Math.max(...gaps) : 0;
     const lines = ['ping ' + Math.round(rtt) + ' ms', 'frames ' + Math.round(gaps.length / 3) + '/s  late ' + late + '  worst gap ' + Math.round(maxGap) + ' ms',
-      'smoothing ' + Math.round(delayF * 1000 / 30) + ' ms'];
-    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(8, 112, 230, 60);
+      'smoothing ' + Math.round(delayF * 1000 / 30) + ' ms',
+      'screen ' + Math.round(netStat.scr.length / 3) + ' fps  slowest ' + Math.round(Math.max(0, ...netStat.scr.map(x => x[1]))) + ' ms'];
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(8, 112, 350, 78);
     lines.forEach((l, i) => uiTxt(l, 16, 126 + i * 18, 16, '#d4ff8a', 'left'));
   }
   if (!v) { txt(joined ? 'Waiting for ' + oppName + '…' : 'Connecting…', 400, 240, 40, '#ffffff', 'center', 7); return; }
