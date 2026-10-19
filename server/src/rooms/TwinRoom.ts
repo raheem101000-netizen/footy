@@ -26,7 +26,7 @@ export interface TwinTarget {
 export const twinTargets = new Map<string, TwinTarget>();
 
 export class TwinRoom extends Room {
-  maxClients = 4;
+  maxClients = 8;
   private target: string = '';
   private users = new Map<string, number>();   // sessionId → userId
 
