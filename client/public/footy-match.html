@@ -556,7 +556,9 @@ function frame(now) {
   // effects advance at the game's 30 frames a second
   fxAcc += dt * 30 / 1000;
   while (fxAcc >= 1) { fxAcc -= 1; stepEffects(); }
-  draw(renderF === null ? null : viewAt(renderF));
+  const view = renderF === null ? null : viewAt(renderF);
+  window.__view = view;   // what this screen is drawing (read by test players)
+  draw(view);
   requestAnimationFrame(frame);
 }
 function stepEffects() {

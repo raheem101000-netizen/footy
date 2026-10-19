@@ -77,6 +77,7 @@ interface LobbyRoomData {
   // entry; the match launches when every player's payment is confirmed by
   // Stripe's webhook. Nothing about the room can change while it's open.
   payment: PaymentWindow | null;
+  test?: boolean;               // a test-bot room: hidden, bots only, never paid (auth.ts)
 }
 
 interface PaymentWindow {
@@ -234,7 +235,7 @@ export class LobbyRoom extends Room {
         code, name,
         open: !priv, password: priv ? password : null, master: auth.userId,
         players: { [auth.userId]: pd }, started: false, kicked: new Set<number>(),
-        chat: [], matchId: null, rematch: null, payment: null,
+        chat: [], matchId: null, rematch: null, payment: null, test: !!auth.testBot,
         prizeMode, lastPrize: null
       };
       this.lobbyRooms[code] = room;
@@ -244,7 +245,7 @@ export class LobbyRoom extends Room {
       // Match alert to everyone who turned them on at tenten.run — public rooms
       // only (a rematch reuses its room, so it never comes through here).
       // Fire-and-forget: never delays or breaks the room.
-      if (!priv) {
+      if (!priv && !auth.testBot) {
         void notifyNewRoom('footy', {
           title: '⚽ FOOTY — opponent waiting',
           body: 'Tap to play — win real cash',
@@ -266,6 +267,7 @@ export class LobbyRoom extends Room {
       // Same account joining again takes over its existing seat (no password
       // needed for your own seat) instead of "already in this room".
       if (room.players[auth.userId]) { this.takeOver(client, room); return; }
+      if (!!room.test !== !!auth.testBot) { client.send('room:error', { message: 'Room not found' }); return; }   // bots and real players never mix
       if (room.started) { client.send('room:error', { message: 'Game already started' }); return; }
       if (room.kicked.has(auth.userId)) { client.send('room:error', { message: 'You were removed from this room by the host' }); return; }
       // Capacity counts distinct accounts, never connections.
@@ -316,7 +318,7 @@ export class LobbyRoom extends Room {
       if (seat.room.started) return;
       // Entry fees on: Ready IS paying — this opens (or reuses) the player's
       // Stripe Checkout; they show as ready once Stripe confirms the payment.
-      if (entryFeesRequested()) { await this.readyToPay(client, seat.room, seat.pd); return; }
+      if (entryFeesRequested() && !seat.room.test) { await this.readyToPay(client, seat.room, seat.pd); return; }
       if (seat.room.payment) return;
       // Ready means "I accept the prize showing right now": only once both
       // players are here and want the same prize.
@@ -363,7 +365,7 @@ export class LobbyRoom extends Room {
       if (!seat) return;
       const { room } = seat;
       if (room.started || room.master !== seat.pd.userId) return;
-      if (entryFeesRequested()) { client.send('room:error', { message: 'The match starts as soon as both players have paid (Ready)' }); return; }
+      if (entryFeesRequested() && !room.test) { client.send('room:error', { message: 'The match starts as soon as both players have paid (Ready)' }); return; }
       if (room.payment) { client.send('room:error', { message: 'Waiting for both entries to be paid' }); return; }
       if (room.rematch) { client.send('room:error', { message: 'Waiting for both players to accept the rematch' }); return; }
       const players = Object.values(room.players);
@@ -909,7 +911,7 @@ export class LobbyRoom extends Room {
     return Object.values(this.lobbyRooms)
       // Like Puz Royale: private rooms are listed too, with a lock; joining
       // one needs its password.
-      .filter(r => !r.started)
+      .filter(r => !r.started && !r.test)
       .map(r => ({
         id: r.code, name: r.name, open: r.open, locked: !!r.password,
         players: Object.keys(r.players).length,

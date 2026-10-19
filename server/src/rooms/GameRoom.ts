@@ -1,5 +1,5 @@
 import { Room, Client, matchMaker } from "@colyseus/core";
-import { authenticateGameToken, FootyAuth } from "../auth";
+import { authenticateGameToken, FootyAuth, isTestBot } from "../auth";
 import { consumeLaunchTicket } from "../launchTickets";
 import { creditFootyWin } from "../payouts";
 import { Prize, asPrize, prizeAmount, entryFeeFor } from "../prizes";
@@ -413,6 +413,12 @@ export class GameRoom extends Room {
 
   private async creditWinner(winner: PlayerSlot, loser: PlayerSlot | null) {
     let state: { status: string; amount?: string } = { status: 'failed' };
+    if (isTestBot(winner.userId) || this.allowedUserIds.some(isTestBot)) {   // test bots: nothing is ever credited
+      this.creditResult = { userId: winner.userId, state: { status: 'disabled' } };
+      this.clients.find(c => c.sessionId === winner.sessionId)?.send('footymp:credit', { status: 'disabled' });
+      this.broadcast('rematch:available', {});
+      return;
+    }
     for (const delay of [0, 1000, 3000]) {
       if (delay) await new Promise(r => setTimeout(r, delay));
       try {
