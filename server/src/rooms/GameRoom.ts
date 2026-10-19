@@ -16,12 +16,20 @@ const TEST_JITTER_MS = Number(process.env.FOOTY_TEST_JITTER_MS) || 0;   // rando
 const SEAT_LAG = (process.env.FOOTY_TEST_SEAT_LAG || '').split(',').map(Number);
 const SEAT_JIT = (process.env.FOOTY_TEST_SEAT_JITTER || '').split(',').map(Number);
 const testLast: Record<string, number> = {};
+// Local tests only: a calm connection with a sudden hold-up of this many ms every 1.5–3 s (like Wi-Fi).
+const TEST_SPIKE_MS = Number(process.env.FOOTY_TEST_SPIKE_MS) || 0;
+let spikeAt = 0, spikeUntil = 0;
 // Hold fn back like a slow connection would, keeping order per path (key: which player and direction).
 const later = (fn: () => void, seat = -1, dir = 'x') => {
   const lag = seat >= 0 && SEAT_LAG[seat] ? SEAT_LAG[seat] : TEST_LAG_MS;
   const jit = seat >= 0 && SEAT_JIT[seat] ? SEAT_JIT[seat] : TEST_JITTER_MS;
-  if (!lag && !jit) { fn(); return; }
-  const key = seat + dir, now = Date.now(), at = Math.max(testLast[key] || 0, now + lag + Math.random() * jit);
+  if (!lag && !jit && !TEST_SPIKE_MS) { fn(); return; }
+  const key = seat + dir, now = Date.now();
+  let at = Math.max(testLast[key] || 0, now + lag + Math.random() * jit);
+  if (TEST_SPIKE_MS && dir !== 'in') {
+    if (now >= spikeAt) { spikeUntil = now + TEST_SPIKE_MS; spikeAt = now + 1500 + Math.random() * 1500; }
+    if (now < spikeUntil) at = Math.max(at, spikeUntil);
+  }
   testLast[key] = at; setTimeout(fn, at - now);
 };
 const PER_SEAT_TEST = SEAT_LAG.some(n => n > 0) || SEAT_JIT.some(n => n > 0);
@@ -376,7 +384,7 @@ export class GameRoom extends Room {
         }
       }
       if (Date.now() - next > 1000) next = Date.now();   // the process was stalled: don't fast-forward the match
-    }, 4);
+    }, 8);
   }
 
   private stopLoop() {
