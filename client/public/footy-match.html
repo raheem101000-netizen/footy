@@ -235,6 +235,26 @@ let renderF = null;
 // position on screen is one the server sent.
 const delayF = 2.2;   // playback runs ~73 ms behind the newest frame (the setting from when nobody felt lag)
 let lastArrive = 0, jitter = 6;
+// ---- connection signal (both players see both) ----
+const netQ = { L: 0, R: 0 };               // 0 good · 1 weak · 2 bad
+let myQ = 0;
+const badUntil = { L: 0, R: 0 };           // keep the warning up a few seconds so it doesn't flicker
+function measureQ() {
+  const now = performance.now(), gaps = netStat.gaps.filter(g => g[0] > now - 3000).map(g => g[1]);
+  if (!gaps.length) return snaps.length ? 2 : 0;   // nothing arrived for 3 s
+  const worst = Math.max(...gaps), late = gaps.filter(g => g > 60).length, quiet = now - lastArrive;
+  if (worst >= 150 || late >= 5 || rtt > 250 || quiet > 400) return 2;
+  if (worst >= 100 || late >= 2 || rtt > 150) return 1;
+  return 0;
+}
+function drawSignal(x, y, q) {
+  const col = q === 2 ? '#ff3b2f' : q === 1 ? '#ffcf3a' : '#46d160', lit = 3 - q;
+  for (let i = 0; i < 3; i++) {
+    const h = 6 + i * 5;
+    ctx.fillStyle = i < lit ? col : 'rgba(255,255,255,.22)';
+    ctx.fillRect(x + i * 6, y + 8 - h, 4, h);
+  }
+}
 let rtt = 80;                                   // ms, measured with ping (for the readout)
 const netStat = { gaps: [], scr: [], show: /[?&]net=1/.test(location.search) };
 addEventListener('keydown', e => { if (e.code === 'KeyN') netStat.show = !netStat.show; });
@@ -271,8 +291,11 @@ function connect() {
   socket.on('presence', ({ p1Away, p2Away }) => { oppAway = mySide === 'L' ? !!p2Away : !!p1Away; setConn(); });
   socket.on('kickoff', () => { snaps.length = 0; renderF = null; effects.length = 0; trail.length = 0; hide('result'); });
   socket.on('s', onSnap);
+  socket.on('nq', (m) => { if (m) { netQ.L = m.L | 0; netQ.R = m.R | 0; } });
   socket.on('pong', (d) => { if (d && d.ts) { const ms = performance.now() - d.ts; if (ms > 0 && ms < 2000) rtt += (ms - rtt) * .3; } });
   setInterval(() => { if (socket && socket.connected) socket.emit('ping', { ts: performance.now() }); }, 1000);
+  // Our own connection quality from the last 3 s, shared with both screens every second.
+  setInterval(() => { myQ = measureQ(); netQ[mySide] = myQ; if (socket && socket.connected) socket.emit('nq', myQ); }, 1000);
   socket.on('superseded', ({ message }) => {
     matchOver = true; setConn();
     showResult('OPENED ELSEWHERE', '#FFB400', message || 'You opened this match somewhere else.');
@@ -711,7 +734,10 @@ function draw(v) {
   // ---- scoreboard and words (never mirrored) ----
   const myScore = v ? (mySide === 'L' ? v.sl : v.sr) : 0, theirScore = v ? (mySide === 'L' ? v.sr : v.sl) : 0;
   const myCol = mySide === 'R' ? '#5aa2ff' : '#ff3b2f', oppCol = mySide === 'R' ? '#ff3b2f' : '#5aa2ff';
-  txt(oppName, 14, 22, 22, oppCol, 'left'); txt(myName, 786, 22, 22, myCol, 'right');
+  const oppSide = mySide === 'L' ? 'R' : 'L';
+  txt(oppName, 14, 22, 22, oppCol, 'left'); const ow = ctx.measureText(oppName).width;
+  txt(myName, 786, 22, 22, myCol, 'right'); const mw = ctx.measureText(myName).width;
+  if (v && v.w) { drawSignal(14 + ow + 8, 20, netQ[oppSide]); drawSignal(786 - mw - 24, 20, myQ); }
   txt(String(theirScore), 20, 82, 44, '#ffffff', 'left'); txt(String(myScore), 780, 82, 44, '#ffffff', 'right');
   const flash = v && v.fl < 18 && (v.fl < 6 || v.fl > 12);
   if (v && v.w) {
@@ -733,6 +759,22 @@ function draw(v) {
   }
   if (!v) { txt(joined ? 'Waiting for ' + oppName + '…' : 'Connecting…', 400, 240, 40, '#ffffff', 'center', 7); return; }
   if (matchOver) return;   // the result screen is up: no game words behind it
+  if (v.w) {   // whose connection is struggling — shown to both players, by name
+    const t = performance.now();
+    for (const sd of ['L', 'R']) if ((sd === mySide ? myQ : netQ[sd]) === 2) badUntil[sd] = t + 4000;
+    const meBad = badUntil[mySide] > t, oppBad = badUntil[oppSide] > t;
+    const msg = meBad && oppBad ? 'Both connections are unstable'
+      : meBad ? 'Your connection is unstable \u2014 move closer to your router or use a cable'
+      : oppBad ? oppName + "'s connection is unstable \u2014 the lag is on their side" : '';
+    if (msg) {
+      ctx.font = "800 17px 'Barlow Condensed','Arial Narrow',sans-serif";
+      const w = Math.min(560, ctx.measureText(msg).width + 44);
+      ctx.fillStyle = 'rgba(20,6,4,.82)'; ctx.beginPath(); ctx.roundRect(400 - w / 2, 150, w, 30, 15); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,59,47,.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+      drawSignal(400 - w / 2 + 12, 160, 2);
+      uiTxt(msg, 400 - w / 2 + 36, 165, 17, '#ffd9d4', 'left', w - 46);
+    }
+  }
   const over = v.gw && v.gw.win;
   if (!over && v.cnt >= 2 && v.cnt < 90 && v.f >= 90) txt(String(v.cnt < 30 ? 3 : v.cnt < 60 ? 2 : 1), 400, 92, 64, '#ffffff', 'center', 8);
   if (v.tx && txT < 100) { ctx.globalAlpha = (100 - txT) / 100; txt(v.tx.text, 400, 196, 56, '#ffffff', 'center', 8); ctx.globalAlpha = 1; }
