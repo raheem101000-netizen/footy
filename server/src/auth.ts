@@ -32,7 +32,7 @@ export interface FootyAuth {
  */
 const TEST_BOT_KEY_SHA256 = "6acf3c3367ea68d2193de0185d9ac0146fd5f84ba8eb490f0077ea6dbcac7e6b";
 export const isTestBot = (userId: number) => userId === -1 || userId === -2;
-function testBotKeyOk(key: string): boolean {
+export function testBotKeyOk(key: string): boolean {
   const got = createHash("sha256").update(key).digest(), want = Buffer.from(TEST_BOT_KEY_SHA256, "hex");
   return got.length === want.length && timingSafeEqual(got, want);
 }
