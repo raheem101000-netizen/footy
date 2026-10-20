@@ -272,7 +272,7 @@ function linkSeen(link) {
   if (linkLast[link]) { (linkGaps[link] = linkGaps[link] || []).push([now, now - linkLast[link]]); if (linkGaps[link].length > 300) linkGaps[link].shift(); }
   linkLast[link] = now;
 }
-const PAGE_VERSION = 'v18-diag';
+const PAGE_VERSION = 'v19-bridge';
 function netReport() {
   const now = performance.now(), win = g => g.filter(x => x[0] > now - 5000).map(x => x[1]);
   const m = win(netStat.gaps), r = a => Math.round(a);
@@ -281,10 +281,10 @@ function netReport() {
   const scr = netStat.scr.map(x => x[1]);
   return { v: PAGE_VERSION, side: mySide, frames: m.length, late60: m.filter(x => x > 60).length, stall120: m.filter(x => x > 120).length,
     stall250: m.filter(x => x > 250).length, worst: r(m.length ? Math.max(...m) : 0), ping: r(rtt), up: 1 + twins.length, links,
-    fps: Math.round(scr.length / 3), slowest: r(scr.length ? Math.max(...scr) : 0), hidden: document.hidden, q: myQ,
+    fps: Math.round(scr.length / 3), slowest: r(scr.length ? Math.max(...scr) : 0), hidden: document.hidden, q: myQ, bridged: Math.round(bridgedMs),
     ua: navigator.userAgent.replace(/^Mozilla\/5\.0 /, '').slice(0, 120) };
 }
-setInterval(() => { if (socket && socket.connected && snaps.length && !matchOver) socket.emit('diag', netReport()); }, 5000);
+setInterval(() => { if (socket && socket.connected && snaps.length && !matchOver) socket.emit('diag', netReport()); bridgedMs = 0; }, 5000);
 
 function onSnap(s, link = 0) {
   linkSeen(link);
@@ -692,6 +692,79 @@ function smoothBoots(v, dt) {
 const wrapA = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
 
 let lastT = performance.now(), fxAcc = 0;
+// ---- silence bridge ----
+// Normally the screen shows only the server's frames (73 ms behind). Only when the
+// connection goes quiet and that cushion runs out does the page keep things moving
+// for up to 0.3 s instead of freezing: the ball keeps its arc (bouncing off the ground
+// and walls), the other ape keeps its speed, and your ape follows the keys you're
+// holding. Goals are never guessed (the ball stops short of a goal mouth). When the
+// server's frames return, any difference glides away over ~0.15 s. Drawing only —
+// the server still decides every touch, goal and result. ?bridge=0 turns it off.
+const BRIDGE = !/[?&]bridge=0/.test(location.search);
+const BRIDGE_MAX = 9;                 // frames (0.3 s) of guessing at most, then hold still
+const WALK = 5.8;                     // an ape's walking speed (px per frame), measured
+const corr = { b: [0, 0], L: [0, 0], R: [0, 0] };
+const bridgeLog = [];   // how far each guess was off when real frames returned (test hook)
+let bridging = false, lastGuess = null, bridgedMs = 0, ownB = null;   // ownB: your ape, moved step by step (a key change turns it, never jumps it)
+function guessView(a) {
+  const n = snaps.length, C = snaps[n - 1];
+  if (n < 3) return C;
+  const B = snaps[n - 2], A = snaps[n - 3];
+  if (!C.w || !B.w || !A.w || C.f - B.f !== 1 || B.f - A.f !== 1) return C;   // only from 3 straight frames
+  const steps = Math.floor(a), frac = a - steps;
+  // the ball
+  let x = C.b[0], y = C.b[1], vx = C.b[0] - B.b[0], vy = C.b[1] - B.b[1], ang = C.b[2];
+  const ay = Math.max(0, Math.min(2, (C.b[1] - B.b[1]) - (B.b[1] - A.b[1]))), spin = wrapA(C.b[2] - B.b[2]);
+  const inGoalZone = x < 92 || x > 708;
+  if (!inGoalZone && Math.hypot(vx, vy) < 60) {
+    for (let i = 0; i <= steps; i++) {
+      const k = i < steps ? 1 : frac; if (!k) break;
+      vy += ay * k; x += vx * k; y += vy * k; ang += spin * k;
+      if (y > 449.3) { y = 449.3 - (y - 449.3) * .5; vy = -vy * .5; }
+      if (x < 92) { x = 92; vx = 0; } if (x > 708) { x = 708; vx = 0; }   // never carry the ball into a goal mouth
+    }
+  }
+  const ball = C.b.slice(); ball[0] = x; ball[1] = y; ball[2] = ang;
+  // the apes
+  const out = { b: ball };
+  const k = keysNow(), dir = (k.r ? 1 : 0) - (k.l ? 1 : 0);
+  for (const sd of ['L', 'R']) {
+    const P = C[sd].slice(), Q = B[sd], O = A[sd];
+    let hx = P[0], hy = P[1], hvx = P[0] - Q[0], hvy = P[1] - Q[1];
+    const hay = Math.max(0, Math.min(3, (P[1] - Q[1]) - (Q[1] - O[1])));
+    const own = sd === mySide;
+    const grounded = Math.abs(P[1] - Q[1]) < .5 && Math.abs(Q[1] - O[1]) < .5, floor = Math.max(440, P[1]);
+    for (let i = 0; i <= steps; i++) {
+      const kk = i < steps ? 1 : frac; if (!kk) break;
+      if (!own) hx += hvx * kk;
+      if (!grounded) { hvy += hay * kk; hy = Math.min(floor, hy + hvy * kk); }
+    }
+    if (own) {   // your own keys move your ape
+      if (!ownB || ownB.f !== C.f) ownB = { f: C.f, a: 0, x: P[0] };
+      const sp = P[9] ? 0 : (Math.abs(P[0] - Q[0]) > 3 ? Math.abs(P[0] - Q[0]) : WALK);
+      ownB.x += dir * sp * Math.max(0, a - ownB.a); ownB.a = a; hx = ownB.x;
+    }
+    hx = Math.max(55, Math.min(759, hx)); if (own) ownB.x = hx;
+    const dx = hx - P[0], dy = hy - P[1];
+    P[0] = hx; P[1] = hy; P[3] += dx; P[4] += dy;   // the boot moves with its head
+    out[sd] = P;
+  }
+  return Object.assign({}, C, out);
+}
+function withCorr(v, dt) {
+  const decay = Math.exp(-dt / 60);
+  let any = false;
+  for (const key of ['b', 'L', 'R']) { corr[key][0] *= decay; corr[key][1] *= decay; if (Math.abs(corr[key][0]) + Math.abs(corr[key][1]) > .3) any = true; else corr[key][0] = corr[key][1] = 0; }
+  if (!any || !v || !v.w) return v;
+  const o = Object.assign({}, v);
+  for (const key of ['b', 'L', 'R']) {
+    const P = v[key].slice(); P[0] += corr[key][0]; P[1] += corr[key][1];
+    if (key !== 'b') { P[3] += corr[key][0]; P[4] += corr[key][1]; }
+    o[key] = P;
+  }
+  return o;
+}
+
 function frame(now) {
   netStat.scr.push([now, now - lastT]); while (netStat.scr.length && netStat.scr[0][0] < now - 3000) netStat.scr.shift();
   const dt = Math.min(250, now - lastT); lastT = now;
@@ -706,12 +779,28 @@ function frame(now) {
       const rate = Math.max(0.9, Math.min(1.6, 1 + (target - renderF) * 0.3));
       renderF += dt * 30 / 1000 * rate;
     }
-    if (renderF > newest) renderF = newest;                          // never draw past the newest real frame
+    // never draw past the newest real frame — except a short guess while the connection is quiet
+    const cap = BRIDGE && snaps.length >= 3 && snaps[snaps.length - 1].w ? newest + BRIDGE_MAX : newest;
+    if (renderF > cap) renderF = cap;
   }
   // effects advance at the game's 30 frames a second
   fxAcc += dt * 30 / 1000;
   while (fxAcc >= 1) { fxAcc -= 1; stepEffects(); }
-  const view = smoothBoots(renderF === null ? null : viewAt(renderF), dt);
+  let base = null;
+  if (renderF !== null && renderF > newest) {                        // the cushion ran out: bridge the silence
+    base = guessView(renderF - newest); bridging = true; lastGuess = base; bridgedMs += dt;
+  } else {
+    base = renderF === null ? null : viewAt(renderF);
+    if (bridging && lastGuess && base && base.w && lastGuess.w) {     // real frames are back: glide from the guess
+      for (const key of ['b', 'L', 'R']) {
+        const dx = lastGuess[key][0] - base[key][0], dy = lastGuess[key][1] - base[key][1];
+        if (Math.hypot(dx, dy) < 120) { corr[key][0] += dx; corr[key][1] += dy; }   // (a goal reset just shows)
+        bridgeLog.push([key, Math.round(Math.hypot(dx, dy))]); if (bridgeLog.length > 300) bridgeLog.shift();
+      }
+    }
+    bridging = false; lastGuess = null; ownB = null;
+  }
+  const view = smoothBoots(withCorr(base, dt), dt);
   window.__view = view; window.__pb = [renderF, newest];   // what this screen is drawing (read by test players)
   draw(view);
   requestAnimationFrame(frame);
@@ -841,7 +930,7 @@ function draw(v) {
 fitRes();
 connect();
 requestAnimationFrame(t => { lastT = t; frame(t); });
-window.__footy = { snaps, get rtt() { return rtt; }, get delayF() { return delayF; }, get side() { return mySide; }, get res() { return RES; }, get twin() { return twins.length; }, keysNow };   // test hook
+window.__footy = { snaps, get rtt() { return rtt; }, get delayF() { return delayF; }, get side() { return mySide; }, get res() { return RES; }, get twin() { return twins.length; }, get bridging() { return bridging; }, bridgeLog, keysNow };   // test hook
 })();
 </script>
 </body>
