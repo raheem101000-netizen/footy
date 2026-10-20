@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>FOOTY — Match</title>
+<title>HEDDY — Match</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Barlow+Condensed:wght@600;700;800&family=Space+Grotesk:wght@400;600;700&display=swap">
 <style>
@@ -75,7 +75,7 @@ body.touch #stage{border-radius:0;box-shadow:none}
 <body>
 <div id="wrap"><div id="box"><div id="stage">
   <canvas id="bg" width="1600" height="1080" aria-hidden="true"></canvas>
-  <canvas id="cv" width="1600" height="1080" aria-label="FOOTY match"></canvas>
+  <canvas id="cv" width="1600" height="1080" aria-label="HEDDY match"></canvas>
   <button class="hudbtn" id="gQuit" style="left:690px;top:510px" title="Quitting a live match is an instant loss">Quit</button>
   <button class="icon" id="gMus" style="left:742px;top:488px" aria-label="Crowd sound"></button>
   <button class="icon" id="gSnd" style="left:770px;top:488px" aria-label="Sound effects"></button>
@@ -636,7 +636,7 @@ function updateSplash(v) {
       g.clearRect(0, 0, c.width, c.height); g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, c.width, c.height);
     }
     document.getElementById('sp-l').textContent = oppName; document.getElementById('sp-r').textContent = myName;
-    document.getElementById('sp-pz').textContent = matchPrize ? '$' + Number(matchPrize) + ' PRIZE' : 'FOOTY 1v1';
+    document.getElementById('sp-pz').textContent = matchPrize ? '$' + Number(matchPrize) + ' PRIZE' : 'HEDDY 1v1';
   }
   document.getElementById('sp-ko').textContent = 'KICK-OFF IN ' + (v.cnt < 30 ? 3 : v.cnt < 60 ? 2 : 1);
 }
@@ -837,7 +837,7 @@ function drawBackground() {
   ctx.drawImage(buildPitch(), 0, 0, 800, 540); ctx.restore();
   drawBar();
   uiTxt('Arrows / WASD - Move', 12, 499, 18, '#f3f5ee', 'left', 128); uiTxt('Space / P - Kick', 12, 522, 18, '#f3f5ee', 'left', 128);
-  ctx.save(); ctx.beginPath(); ctx.rect(298, 485, 270, 51); ctx.clip(); txt('FOOTY', 433, 511, 34, '#ffcf3a', 'center'); ctx.restore();
+  ctx.save(); ctx.beginPath(); ctx.rect(298, 485, 270, 51); ctx.clip(); txt('HEDDY', 433, 511, 34, '#ffcf3a', 'center'); ctx.restore();
   ctx = front;
 }
 // the bar's lettering uses a web font: draw the back layer again once it has loaded

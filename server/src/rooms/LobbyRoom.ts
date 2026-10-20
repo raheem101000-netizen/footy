@@ -247,7 +247,7 @@ export class LobbyRoom extends Room {
       // Fire-and-forget: never delays or breaks the room.
       if (!priv && !auth.testBot) {
         void notifyNewRoom('footy', {
-          title: '⚽ FOOTY — opponent waiting',
+          title: '⚽ HEDDY — opponent waiting',
           body: 'Tap to play — win real cash',
           url: '/?play=footymp',
           tag: 'footy-new-room',
