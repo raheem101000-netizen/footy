@@ -218,6 +218,14 @@ if (!auth || !roomFromURL) location.replace('/rooms.html');
 const browserId = (() => { try { let id = localStorage.getItem('footy_bid'); if (!id) { id = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10); localStorage.setItem('footy_bid', id); } return id; } catch (e) { return null; } })();
 let socket = null, mySide = 'R', myName = (auth && auth.name) || 'You', oppName = 'Opponent', matchPrize = null;
 let meReconnecting = false, oppAway = false, matchOver = false, lobbyReturnTimer = null, joined = false;
+// Reached with Back/Forward, restored from the back/forward cache, or the app
+// was switched away and back: if the match is over, the page stays on the
+// result (Back to Lobby / ← TENTEN) instead of sending itself to the lobby —
+// otherwise Back would land here again and be pushed forward again, forever.
+let noAutoLobby = (((performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || {}).type === 'back_forward')
+  || !!(performance.navigation && performance.navigation.type === 2);
+window.addEventListener('pageshow', e => { if (e.persisted) noAutoLobby = true; });
+document.addEventListener('visibilitychange', () => { if (document.hidden) noAutoLobby = true; });
 const mirrored = () => mySide === 'L';   // the left player's page is mirrored, so you always play on the right
 
 function setConn() {
@@ -385,6 +393,7 @@ function amount(t) { const el = document.getElementById('r-amt'); el.textContent
 function credit(text, color) { const el = document.getElementById('r-credit'); el.textContent = text; el.style.color = color; el.style.display = 'block'; }
 function returnToLobbySoon(seconds) {
   if (lobbyReturnTimer) return;
+  if (noAutoLobby) return;
   let n = seconds || 6;
   const tick = () => { credit('Back to the lobby in ' + n + '…', 'rgba(255,255,255,0.55)'); if (n-- <= 0) { clearInterval(lobbyReturnTimer); if (socket) socket.disconnect(); location.href = lobbyURL(); } };
   tick(); lobbyReturnTimer = setInterval(tick, 1000);

@@ -892,16 +892,15 @@ export class LobbyRoom extends Room {
     this.sendToRoom(room, 'room:state', serializeRoom(room));
   }
 
-  // The match this account was launched into, if it's still being played —
-  // or if it ended while the account was away and it hasn't seen the result
-  // yet (the match page shows it once, then sends it back to the lobby).
+  // The match this account was launched into, only while it's still being
+  // played. A match that has ended is never rejoined — not even to show a
+  // result the account missed — so a page can't be sent into a finished match.
   private async liveMatchOf(userId: number): Promise<string | null> {
     const roomId = this.userMatch.get(userId);
     if (!roomId) return null;
     try {
       const [listing] = await matchMaker.query({ name: "game_room", roomId });
-      const unseen: number[] = Array.isArray(listing?.metadata?.unseen) ? listing.metadata.unseen : [];
-      if (listing && (!listing.metadata?.over || unseen.includes(userId))) return roomId;
+      if (listing && listing.metadata?.over === false) return roomId;
     } catch (_) {}
     this.userMatch.delete(userId);
     return null;
