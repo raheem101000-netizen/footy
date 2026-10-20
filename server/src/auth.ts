@@ -54,7 +54,7 @@ export async function authenticateGameToken(token: unknown, playerId: unknown): 
     [token, userId, TOKEN_MAX_AGE_HOURS]
   );
   if (!result.rows.length) {
-    throw new ServerError(401, "Your login has expired — go back to tenten.run and press PLAY on FOOTY again");
+    throw new ServerError(401, "Your login has expired — go back to tenten.run and press PLAY on HEDDY again");
   }
   return { userId: result.rows[0].id, displayName: result.rows[0].display_name };
 }
