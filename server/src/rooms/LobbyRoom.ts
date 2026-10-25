@@ -1,6 +1,9 @@
-import { Room, Client, matchMaker } from "@colyseus/core";
+import { Room, Client, matchMaker, ServerError } from "@colyseus/core";
 import { authenticateGameToken, FootyAuth } from "../auth";
-import { issueLaunchTicket } from "../launchTickets";
+import {
+  multiRegion, isHomeServer, pickRegion, cleanPings, pingsText, createMatchHere, regionCall,
+  REGION_CREATE_TIMEOUT_MS, Pings,
+} from "../regions";
 import { notifyNewRoom } from "../pushNotifications";
 import { Prize, PrizeMode, asOfferedPrize, asOfferedPrizeMode, OFFERED_PRIZES, TEN_TIER_OFFERED, entryFeeFor, prizeAmount } from "../prizes";
 import {
@@ -164,12 +167,18 @@ export class LobbyRoom extends Room {
   private clientRoom = new Map<string, string>();     // connection bound to a seat → room code
   private userRoom = new Map<number, string>();       // account → room code it holds a seat in
   private userMatch = new Map<number, string>();      // account → game_room it was launched into
+  // Multi-region (regions.ts): each account's pings to every region, from its
+  // lobby page, and the region each match was started on (absent: this server).
+  private pings = new Map<number, Pings>();
+  private matchRegion = new Map<string, string>();
   private held = new Map<string, { reject: (e?: any) => void }>(); // pending token resumes, by connection
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private recoverTimer: ReturnType<typeof setInterval> | null = null;
 
   // Every lobby connection must be a logged-in tenten.run account.
   static async onAuth(token: string, options: any) {
+    // A regional server only hosts matches: the lobby is on the home server.
+    if (!isHomeServer()) throw new ServerError(403, "The lobby is on the home server");
     return authenticateGameToken(token, options?.playerId);
   }
 
@@ -181,6 +190,14 @@ export class LobbyRoom extends Room {
     const recover = () => recoverStranded("footy", id => this.liveAttempt(id) !== null)
       .catch(e => console.error("[entry-fees] recovery sweep failed:", e));
     if (entryFeesReady()) { setTimeout(recover, 5_000); this.recoverTimer = setInterval(recover, 60_000); }
+
+    // Multi-region: the page's measured pings to each region (on connect and
+    // every 60 s); the match is started where both players' pings are best
+    // and most equal (launchMatch). Single server: ignored.
+    this.onMessage("lobby:pings", (client: Client, data: any) => {
+      const p = cleanPings(data);
+      if (p) this.pings.set((client.auth as FootyAuth).userId, p);
+    });
 
     this.onMessage("room:list", (client: Client) => {
       client.send("room:list", { rooms: this.serializeList() });
@@ -203,8 +220,8 @@ export class LobbyRoom extends Room {
       const code = this.userRoom.get(auth.userId);
       const room = code ? this.lobbyRooms[code] : undefined;
       if (room && room.players[auth.userId]) { this.takeOver(client, room); return; }
-      const matchId = await this.liveMatchOf(auth.userId);
-      if (matchId) { client.send('room:match', { code: matchId }); return; }
+      const live = await this.liveMatchOf(auth.userId);
+      if (live) { client.send('room:match', { code: live.roomId, ...(live.region ? { region: live.region } : {}) }); return; }
       client.send('room:rejoin:none', {});
     });
 
@@ -787,13 +804,7 @@ export class LobbyRoom extends Room {
     try {
       // A new game_room per match (rematches included): its room id is the
       // match's credit key ('footymp:<roomId>'), so each match pays once.
-      const gameRoom = await matchMaker.createRoom("game_room", {
-        launchTicket: issueLaunchTicket(), // proves this match came from a lobby, not a client
-        allowedUserIds: players.map(p => p.userId),
-        lobbyRoomId: this.roomId,          // for the rematch handshake
-        agreedPrize: agreed,               // the prize both were ready on — the winner is credited this
-        entriesCharged: !!pw,              // both entries paid (entry fees on)
-      });
+      const gameRoom = await this.startMatchRoom(room, players, agreed, !!pw);
       if (pw) {
         room.payment = null;
         await attachMatch(pw.attemptId, `footymp:${gameRoom.roomId}`, 'FOOTY').catch(e =>
@@ -803,7 +814,8 @@ export class LobbyRoom extends Room {
       room.lastPrize = agreed;
       this.sendToRoom(room, 'room:game:start', {
         code: gameRoom.roomId,
-        players: players.map(serializePlayer)
+        players: players.map(serializePlayer),
+        ...(gameRoom.region ? { region: gameRoom.region } : {}),   // multi-region: the server the match is on
       });
       // The seats now live in the match room (account-owned there too). A
       // page that reloads into the lobby is sent back to the match while it's
@@ -834,7 +846,38 @@ export class LobbyRoom extends Room {
     }
   }
 
-  // ── Rematch (called by the game_room through matchMaker.remoteRoomCall) ──
+  // The match room: on this server (single server), or — multi-region — on
+  // the region that is best and most equal for the two players. A region that
+  // can't be reached in time never stops the match: it starts here instead
+  // (both may already have paid).
+  private async startMatchRoom(room: LobbyRoomData, players: PlayerData[], agreed: Prize, entriesCharged: boolean): Promise<{ roomId: string; region: string | null }> {
+    const opts = { allowedUserIds: players.map(p => p.userId), lobbyRoomId: this.roomId, agreedPrize: agreed, entriesCharged };
+    const cfg = multiRegion();
+    if (!cfg) return { roomId: await createMatchHere(opts), region: null };
+    const [a, b] = players;
+    const pa = this.pings.get(a.userId), pb = this.pings.get(b.userId);
+    const pick = pickRegion(pa, pb, this.pings.get(room.master), Object.keys(cfg.regions), cfg.home);
+    let region = pick.region, roomId: string | null = null, note = pick.why === "fair" ? `score ${pick.score}` : pick.why;
+    if (region !== cfg.self) {
+      try {
+        const out = await regionCall(region, "/internal/create-match", opts, REGION_CREATE_TIMEOUT_MS);
+        if (typeof out?.roomId !== "string" || !out.roomId) throw new Error("no room id in the answer");
+        roomId = out.roomId;
+      } catch (e: any) {
+        console.error(`[regions] room ${room.code}: ${region} couldn't start the match (${e?.message || e}) — starting it on ${cfg.self} instead`);
+        note += `, ${region} unreachable → fallback`;
+        region = cfg.self;
+      }
+    }
+    if (!roomId) roomId = await createMatchHere(opts);
+    this.matchRegion.set(roomId, region);
+    if (this.matchRegion.size > 2000) this.matchRegion.delete(this.matchRegion.keys().next().value!);
+    console.log(`[regions] match ${roomId} on ${region} — ${a.name} (${pingsText(pa)}) vs ${b.name} (${pingsText(pb)}) [${note}]`);
+    return { roomId, region };
+  }
+
+  // ── Rematch (called by the game_room through matchMaker.remoteRoomCall,
+  //    or — a match on another region — through POST /internal/lobby-call) ──
 
   // A player pressed Rematch on the match-over screen. First press: the room
   // the match was launched from comes back (same players, same chat) with the
@@ -875,6 +918,7 @@ export class LobbyRoom extends Room {
 
   // The match room closed: if no rematch was asked for, the room goes.
   public matchClosed(matchId: string) {
+    this.matchRegion.delete(matchId);
     const room = Object.values(this.lobbyRooms).find(r => r.matchId === matchId && r.started);
     if (room) delete this.lobbyRooms[room.code];
   }
@@ -897,12 +941,26 @@ export class LobbyRoom extends Room {
   // The match this account was launched into, only while it's still being
   // played. A match that has ended is never rejoined — not even to show a
   // result the account missed — so a page can't be sent into a finished match.
-  private async liveMatchOf(userId: number): Promise<string | null> {
+  private async liveMatchOf(userId: number): Promise<{ roomId: string; region: string | null } | null> {
     const roomId = this.userMatch.get(userId);
     if (!roomId) return null;
+    // Multi-region: a match on another region is asked about there. Not
+    // reachable right now: not rejoined this time, but remembered (asked again).
+    const cfg = multiRegion(), region = this.matchRegion.get(roomId) || null;
+    if (cfg && region && region !== cfg.self) {
+      try {
+        const out = await regionCall(region, "/internal/match-live", { roomId }, 4_000);
+        if (out?.live === true) return { roomId, region };
+      } catch (e: any) {
+        console.error(`[regions] couldn't ask ${region} about match ${roomId}: ${e?.message || e}`);
+        return null;
+      }
+      this.userMatch.delete(userId);
+      return null;
+    }
     try {
       const [listing] = await matchMaker.query({ name: "game_room", roomId });
-      if (listing && listing.metadata?.over === false) return roomId;
+      if (listing && listing.metadata?.over === false) return { roomId, region };
     } catch (_) {}
     this.userMatch.delete(userId);
     return null;

@@ -332,6 +332,8 @@ body{background:radial-gradient(ellipse 70% 50% at 50% 0%,rgba(212,175,55,.14),t
 
 <!-- The prize table (server/src/prizes.ts): prize and entry fee come from one place -->
 <script src="/prizes.js"></script>
+<!-- Multi-region: region names → URLs (server/src/regions.ts; {} on a single server) -->
+<script src="/regions.js"></script>
 <script src="/colyseus-adapter.js"></script>
 <script>
 // ── tenten.run login handoff ─────────────────────────────────────────────────
@@ -366,6 +368,41 @@ if (/[?&]testlink=1/.test(location.search) && footyAuth) {
 if (!footyAuth) document.getElementById('login-gate').style.display = 'flex';
 
 const socket = io();
+
+// ── Multi-region: pings to every match server (docs/MULTI_REGION.md) ─────────
+// Each region's /ping is timed 4 times; the first (connection setup) is
+// ignored and the lowest of the rest kept. Sent to the lobby on connect and
+// every 60 s; the lobby starts the match where both players' pings are best
+// and most equal. Single server: no regions, nothing measured or sent.
+const REGIONS = window.FOOTY_REGIONS || {};
+let myPings = null;
+async function pingRegion(url){
+  let best = Infinity;
+  for (let i = 0; i < 4; i++) {
+    const t0 = performance.now();
+    try { await fetch(url + '/ping?t=' + Date.now() + i, { cache: 'no-store', mode: 'cors' }); } catch (_) { return null; }
+    if (i > 0) best = Math.min(best, performance.now() - t0);
+  }
+  return Math.round(best);
+}
+async function measurePings(){
+  // Local testing only: ?pings=ohio:20,oregon:60 stands in for real measurements.
+  const fake = new URLSearchParams(location.search).get('pings');
+  if (fake && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+    const out = {};
+    for (const part of fake.split(',')) { const [r, ms] = part.split(':'); if (REGIONS[r] && isFinite(Number(ms))) out[r] = Number(ms); }
+    return out;
+  }
+  const names = Object.keys(REGIONS), out = {};
+  const ms = await Promise.all(names.map(n => pingRegion(REGIONS[n])));
+  names.forEach((n, i) => { if (ms[i] != null) out[n] = ms[i]; });
+  return out;
+}
+function sendPings(){ if (myPings && Object.keys(myPings).length) socket.emit('lobby:pings', myPings); }
+async function refreshPings(){ myPings = await measurePings(); sendPings(); }
+if (Object.keys(REGIONS).length) { refreshPings(); setInterval(refreshPings, 60000); }
+// The match page's server: &srv=<region> when the match is on a named region.
+function srvParam(region){ return region && REGIONS[region] ? '&srv=' + encodeURIComponent(region) : ''; }
 const COLORS = ['#d4af37','#4488FF'];
 let myName = footyAuth ? (footyAuth.name || 'Player') : '';
 let myRoom = null, isMaster = false, isReady = false, roomIsPublic = true, pendingReady = false;
@@ -396,6 +433,7 @@ function setConnNotice(t){ const el=document.getElementById('conn-notice'); el.t
 function backToList(){ myRoom=null; isMaster=false; isReady=false; showList(); socket.emit('room:list'); }
 socket.on('connect', ()=>{
   status('Connected','ok'); socket.emit('room:list');
+  sendPings();
   if (!isSuperseded()) {
     if (myRoom || remembered()) setConnNotice('Rejoining your room…');
     socket.emit('room:rejoin', { code: (myRoom && myRoom.code) || remembered() });
@@ -419,10 +457,10 @@ let arrivedByBackForward = (((performance.getEntriesByType && performance.getEnt
   || !!(performance.navigation && performance.navigation.type === 2);
 window.addEventListener('pageshow', e=>{ if (e.persisted) arrivedByBackForward = true; });
 // Our account's match is still being played: back to it.
-socket.on('room:match', ({code})=>{
+socket.on('room:match', ({code, region})=>{
   remember(null);
   if (arrivedByBackForward) { setConnNotice('Your match is still on — reload this page to go back to it.'); return; }
-  setConnNotice('Your match is still on — taking you back…'); window.location.href='/footy-match.html?room='+encodeURIComponent(code);
+  setConnNotice('Your match is still on — taking you back…'); window.location.href='/footy-match.html?room='+encodeURIComponent(code)+srvParam(region);
 });
 // Our seat was opened in another tab or device: this tab steps back to the list.
 // Away longer than the seat hold: the server released our seat.
@@ -502,7 +540,7 @@ setInterval(()=>{ if(myRoom && myRoom.payment) renderPay(); },1000);
   else status('Payment cancelled — you can still pay before the timer runs out.','err');
 })();
 document.getElementById('btn-rematch').onclick=()=>{ if(myRoom&&myRoom.rematch) socket.emit('room:rematch'); };
-socket.on('room:game:start', ({code})=>{ remember(null); status('Game starting!','ok'); setTimeout(()=>{ window.location.href='/footy-match.html?room='+code+'&name='+encodeURIComponent(myName); },600); });
+socket.on('room:game:start', ({code, region})=>{ remember(null); status('Game starting!','ok'); setTimeout(()=>{ window.location.href='/footy-match.html?room='+code+'&name='+encodeURIComponent(myName)+srvParam(region); },600); });
 
 function renderRoomList(rooms) {
   const tbody=document.getElementById('rooms-tbody');

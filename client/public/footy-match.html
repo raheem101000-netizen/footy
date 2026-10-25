@@ -110,6 +110,8 @@ body.touch #stage{border-radius:0;box-shadow:none}
   </div>
 </div></div></div>
 
+<!-- Multi-region: region names → URLs (server/src/regions.ts); the adapter connects to the &srv= one -->
+<script src="/regions.js"></script>
 <script src="/colyseus-adapter.js"></script>
 <script>
 (() => {
@@ -437,7 +439,8 @@ let twins = [], twinBusy = false, keyQ = 0, twinCount = 0;
 function openTwin() {
   if (twins.length >= EXTRA_LINKS || twinBusy || matchOver || !window.Colyseus || !auth) return;
   twinBusy = true;
-  const c = new Colyseus.Client((location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host);
+  // The same server as the match connection (multi-region: the match's region, from the adapter).
+  const c = new Colyseus.Client(window.footyServerURL || ((location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host));
   c.auth.token = auth.token;
   c.joinOrCreate('twin_room', { room: roomFromURL, playerId: auth.playerId }).then(r => {
     twinBusy = false; twins.push(r);

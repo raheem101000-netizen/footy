@@ -6,6 +6,7 @@ import { Prize, asPrize, prizeAmount, entryFeeFor } from "../prizes";
 import { createSim, FootySim, Side, NO_KEYS } from "../footy/sim";
 import { twinTargets, TwinTarget } from "./TwinRoom";
 import { recordNet } from "../netlog";
+import { multiRegion, regionCall } from "../regions";
 
 // The match runs here, on the server, at the original game's 30 frames a
 // second (footy/sim.ts), and every frame goes to both players. The pages
@@ -102,6 +103,9 @@ export class GameRoom extends Room implements TwinTarget {
   private abandoned = false;
   private entriesCharged = false;   // both players paid their entry (entryPayments.ts)
   private lobbyRoomId: string | null = null;
+  // Multi-region: this match was started by the lobby on the home server
+  // (regions.ts), so the lobby is reached over /internal/lobby-call.
+  private lobbyIsRemote = false;
   // The prize both players were ready on when the lobby launched this match.
   private agreedPrize: Prize = 5;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -129,6 +133,7 @@ export class GameRoom extends Room implements TwinTarget {
     this.agreedPrize = agreed;
     this.lobbyRoomId = typeof options?.lobbyRoomId === 'string' ? options.lobbyRoomId : null;
     this.entriesCharged = options?.entriesCharged === true;
+    this.lobbyIsRemote = options?.lobbyIsRemote === true;
     this.setMetadata({ over: false });
     this.sweepTimer = setInterval(() => this.sweep(), SWEEP_MS);
     twinTargets.set(this.roomId, this);
@@ -216,7 +221,7 @@ export class GameRoom extends Room implements TwinTarget {
       const slot = this.gameJoined.find(p => p.sessionId === client.sessionId);
       if (!slot || !this.rematchAvailable() || !this.lobbyRoomId) return;
       try {
-        const out: any = await matchMaker.remoteRoomCall(this.lobbyRoomId, 'requestRematch' as any, [this.roomId, slot.userId]);
+        const out: any = await this.callLobby('requestRematch', [this.roomId, slot.userId]);
         if (out && out.ok) this.broadcast('rematch:go', { byName: slot.name });
         else client.send('rematch:error', { message: out?.error || 'Rematch not possible right now' });
       } catch (e) {
@@ -287,7 +292,17 @@ export class GameRoom extends Room implements TwinTarget {
     twinTargets.delete(this.roomId);
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.stopLoop();
-    if (this.lobbyRoomId) matchMaker.remoteRoomCall(this.lobbyRoomId, 'matchClosed' as any, [this.roomId]).catch(() => {});
+    if (this.lobbyRoomId) this.callLobby('matchClosed', [this.roomId]).catch(() => {});
+  }
+
+  // A call to the lobby that launched this match: on this server directly; on
+  // the home server (multi-region) through its secret-only /internal/lobby-call.
+  private async callLobby(method: 'requestRematch' | 'matchClosed', args: unknown[]): Promise<any> {
+    if (!this.lobbyIsRemote) return matchMaker.remoteRoomCall(this.lobbyRoomId!, method as any, args as any);
+    const cfg = multiRegion();
+    if (!cfg) throw new Error("multi-region is off — the home lobby can't be reached");
+    const out = await regionCall(cfg.home, "/internal/lobby-call", { lobbyRoomId: this.lobbyRoomId, method, args }, 8_000);
+    return out?.result;
   }
 
   public entryFee(): string {

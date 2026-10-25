@@ -10,6 +10,7 @@ import { GameRoom } from "./rooms/GameRoom";
 import { TwinRoom } from "./rooms/TwinRoom";
 import { netlogHandler } from "./netlog";
 import { prizesClientScript } from "./prizes";
+import { regionRoutes, homeURLIfRegional } from "./regions";
 
 export const server = defineServer({
     // Heartbeat: ping every 10 s, drop a connection after 3 missed pings
@@ -50,14 +51,26 @@ export const server = defineServer({
             res.type("application/javascript").set("Cache-Control", "no-cache").send(prizesClientScript());
         });
 
+        // Multi-region (regions.ts, docs/MULTI_REGION.md): /ping, /regions.js and
+        // the secret-only /internal/* calls between servers.
+        regionRoutes(app);
+
+        // A regional server only hosts matches: its lobby pages send people to
+        // the home server (path and query kept), so nobody ends up in a second lobby.
+        const homeURL = homeURLIfRegional();
+        const toHome = (req: express.Request, res: express.Response) => res.redirect(302, homeURL + req.originalUrl);
+        if (homeURL) app.get('/rooms.html', toHome);
+
         // Root → rooms lobby (before express.static so it wins over index.html)
-        app.get('/', (_req, res) => {
+        app.get('/', (req, res) => {
+            if (homeURL) return toHome(req, res);
             res.sendFile(path.join(__dirname, "../../client/dist/rooms.html"));
         });
 
         app.use(express.static(path.join(__dirname, "../../client/dist")));
 
-        app.get(/^(?!\/colyseus).*/, (_req, res) => {
+        app.get(/^(?!\/colyseus).*/, (req, res) => {
+            if (homeURL) return toHome(req, res);
             res.sendFile(path.join(__dirname, "../../client/dist/rooms.html"));
         });
     },

@@ -23,6 +23,15 @@
   var isGame = location.pathname.indexOf('footy-match') !== -1;
   var roomCodeFromURL = new URLSearchParams(location.search).get('room');
   var serverURL = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host;
+  // Multi-region (docs/MULTI_REGION.md): the match link names the server the
+  // match is on (&srv=<region>). Only a name listed in /regions.js is used —
+  // never a raw URL from the link. The lobby always stays on this server.
+  var srv = new URLSearchParams(location.search).get('srv');
+  var regionURLs = window.FOOTY_REGIONS || {};
+  if (isGame && srv && Object.prototype.hasOwnProperty.call(regionURLs, srv)) {
+    serverURL = String(regionURLs[srv]).replace(/^http/, 'ws');
+  }
+  window.footyServerURL = serverURL;   // footy-match.html's twin connections use the same server
 
   var HB_EVERY_MS = 5000;
   var HB_DEAD_MS = 15000;
