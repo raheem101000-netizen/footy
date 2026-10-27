@@ -142,13 +142,22 @@ export async function migrateChallenges() {
         id            SERIAL PRIMARY KEY,
         challenge_id  INTEGER NOT NULL REFERENCES challenges(id),
         event         TEXT NOT NULL
-                        CHECK (event IN ('created','claimed','reopened','reconciled','finished','cancelled','expired')),
+                        CHECK (event IN ('created','claimed','reopened','reconciled','finished','cancelled','expired','admin_released')),
         user_id       INTEGER,
         detail        JSONB,
         at            TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS challenge_events_by_challenge ON challenge_events (challenge_id, at)`);
+    // 'admin_released' joined the event list: widen a table made before it.
+    await client.query(`DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'challenge_events_event_check'
+                  AND pg_get_constraintdef(oid) NOT LIKE '%admin_released%') THEN
+        ALTER TABLE challenge_events DROP CONSTRAINT challenge_events_event_check;
+        ALTER TABLE challenge_events ADD CONSTRAINT challenge_events_event_check
+          CHECK (event IN ('created','claimed','reopened','reconciled','finished','cancelled','expired','admin_released'));
+      END IF;
+    END $$`);
     await client.query("COMMIT");
     console.log("[challenges] tables ready");
   } catch (e) {
@@ -317,6 +326,53 @@ export async function reconcileChallenges(liveRoomCodes: string[], db: Queryable
       WHERE game = $1 AND status = 'in_match' AND (room_code IS NULL OR NOT (room_code = ANY($2::text[])))
       RETURNING *`,
     [GAME, liveRoomCodes], "reconciled", "NULL", "NULL");
+}
+
+// ── Admin: stuck challenges (challengesAdmin.ts) ─────────────────────────────
+
+export interface InMatchChallenge extends Challenge {
+  host_display_name: string | null;
+  joiner_display_name: string | null;
+  /** A settled HEDDY match between the two since the claim (it was probably played). */
+  played_match_key: string | null;
+}
+
+/** Every in_match challenge of this game, oldest claim first — the candidates for a release. */
+export async function listInMatchChallenges(db: Queryable = pool): Promise<InMatchChallenge[]> {
+  const { rows } = await db.query(
+    `SELECT c.*, h.display_name AS host_display_name, j.display_name AS joiner_display_name,
+            (SELECT m.match_key FROM settled_matches m
+               JOIN settled_match_players a ON a.match_key = m.match_key AND a.user_id = c.host_user_id
+               JOIN settled_match_players b ON b.match_key = m.match_key AND b.user_id = c.joiner_user_id
+              WHERE m.game = c.game AND m.settled_at >= c.joined_at
+              ORDER BY m.settled_at LIMIT 1) AS played_match_key
+       FROM challenges c
+       JOIN users h ON h.id = c.host_user_id
+       LEFT JOIN users j ON j.id = c.joiner_user_id
+      WHERE c.game = $1 AND c.status = 'in_match'
+      ORDER BY c.joined_at`,
+    [GAME]
+  );
+  return rows;
+}
+
+/**
+ * Admin release of a stuck challenge (the server restarted with an opponent
+ * seated, so nothing will ever move it): in_match → open, the opponent
+ * cleared, a fresh 14 days on the clock. reopen_count stays (nobody left).
+ * Only by id, only from in_match; the 'admin_released' event keeps who was
+ * seated and in which room. The caller checks it isn't live first.
+ */
+export async function releaseStuckChallenge(id: number, note: string | null = null, db: Queryable = pool): Promise<Challenge | null> {
+  return one(await transition(db,
+    `UPDATE challenges ch
+        SET status = 'open', joiner_user_id = NULL, joined_at = NULL, room_code = NULL,
+            opened_at = now(), expires_at = now() + interval '${OPEN_DAYS} days'
+       FROM (SELECT id, joiner_user_id AS was_joiner, room_code AS was_room FROM challenges WHERE id = $1) old
+      WHERE ch.id = old.id AND ch.game = $2 AND ch.status = 'in_match'
+      RETURNING ch.*, old.was_joiner, old.was_room`,
+    [id, GAME, note], "admin_released", "NULL",
+    "jsonb_build_object('by', 'admin', 'joiner_user_id', c.was_joiner, 'room_code', c.was_room, 'note', $3::text)"));
 }
 
 export interface OpenChallenge extends Challenge { host_display_name: string | null }

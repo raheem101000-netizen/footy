@@ -4,6 +4,7 @@ import express from "express";
 import path from "path";
 import { migrateSettledMatches } from "./settledMatches";
 import { migrateChallenges } from "./challenges";
+import { challengeAdminRoutes } from "./challengesAdmin";
 import { migratePushSubscriptions } from "./pushNotifications";
 import { migrateMatchPayments, webhookHandler } from "./entryPayments";
 import { LobbyRoom } from "./rooms/LobbyRoom";
@@ -55,6 +56,9 @@ export const server = defineServer({
         // Multi-region (regions.ts, docs/MULTI_REGION.md): /ping, /regions.js and
         // the secret-only /internal/* calls between servers.
         regionRoutes(app);
+
+        // Admin: list / release stuck open challenges (challengesAdmin.ts) — ADMIN_KEY only.
+        challengeAdminRoutes(app);
 
         // A regional server only hosts matches: its lobby pages send people to
         // the home server (path and query kept), so nobody ends up in a second lobby.
