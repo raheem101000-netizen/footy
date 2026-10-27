@@ -5,7 +5,7 @@ import {
   REGION_CREATE_TIMEOUT_MS, Pings,
 } from "../regions";
 import { notifyNewRoom } from "../pushNotifications";
-import { challengesEnabled, createChallenge, cancelChallenge, cancelHostChallenge, claimChallenge, unclaimChallenge, reopenChallenge, finishChallenge, expireChallenges, withTimeout } from "../challenges";
+import { challengesEnabled, createChallenge, cancelChallenge, cancelHostChallenge, claimChallenge, unclaimChallenge, reopenChallenge, finishChallenge, expireChallenges, getChallenge, withTimeout, Challenge } from "../challenges";
 import { Prize, PrizeMode, asOfferedPrize, asOfferedPrizeMode, OFFERED_PRIZES, TEN_TIER_OFFERED, entryFeeFor, prizeAmount } from "../prizes";
 import {
   entryFeesRequested, entryFeesReady, toCents, openPayment, cancelAttempt, attachMatch, creditRow, payWithCredit,
@@ -407,6 +407,12 @@ export class LobbyRoom extends Room {
       if (challengesEnabled()) void this.cancelOwnChallenge(client);
     });
 
+    // Open challenges: open one by id — its host coming back to it, or anyone
+    // accepting it (the boards, a ?challenge= link). Lands them in its room.
+    this.onMessage("room:challenge", (client: Client, data: any) => {
+      if (challengesEnabled()) this.openChallenge(client, Number(data?.id));
+    });
+
     // The only way to give a seat up yourself.
     this.onMessage("room:leave", (client: Client) => {
       const seat = this.seatOf(client);
@@ -551,8 +557,10 @@ export class LobbyRoom extends Room {
       pick,
       lastSeen: Date.now(), away: false, awaySince: 0
     };
-    if (Object.keys(room.players).length === 0) { pd.master = true; room.master = auth.userId; }
-    else if (room.challenge && room.master === auth.userId) pd.master = true;   // the challenge's host is back
+    // A challenge room's host is always the challenge's host, seated or not;
+    // anywhere else the first player in becomes host.
+    if (room.challenge) pd.master = room.master === auth.userId;
+    else if (Object.keys(room.players).length === 0) { pd.master = true; room.master = auth.userId; }
     // Someone new at the table: any earlier Ready was for a different pairing.
     for (const p of Object.values(room.players)) p.ready = false;
     room.players[auth.userId] = pd;
@@ -604,6 +612,139 @@ export class LobbyRoom extends Room {
     } finally {
       this.challengeBusy.delete(auth.userId);
     }
+  }
+
+  // room:challenge {id}. One at a time per challenge on this server (so a
+  // host coming back and an opponent arriving never build two rooms for it);
+  // across servers the atomic claim decides.
+  private challengeLocks = new Map<number, Promise<void>>();
+  private openChallenge(client: Client, id: number) {
+    if (!Number.isInteger(id) || id <= 0) { client.send('room:error', { message: 'This challenge has ended' }); return; }
+    const run = (this.challengeLocks.get(id) || Promise.resolve())
+      .then(() => this.openChallengeNow(client, id))
+      .catch(e => console.error(`[challenges] opening challenge ${id} failed:`, e));
+    this.challengeLocks.set(id, run);
+    void run.then(() => { if (this.challengeLocks.get(id) === run) this.challengeLocks.delete(id); });
+  }
+
+  private async openChallengeNow(client: Client, id: number) {
+    const auth = client.auth as FootyAuth;
+    if (!this.clients.includes(client)) return;
+    if (auth.testBot) { client.send('room:error', { message: 'Room not found' }); return; }
+    if (this.challengeBusy.has(auth.userId)) return;
+    const live = Object.values(this.lobbyRooms).find(r => r.challenge?.id === id);
+    // Already seated in it (another tab, a reload): the seat back, as room:join does.
+    if (live && live.players[auth.userId]) { this.takeOver(client, live); return; }
+
+    let row: Challenge | null;
+    try {
+      row = await withTimeout(getChallenge(id));
+    } catch (e) {
+      console.error(`[challenges] account ${auth.userId}: couldn't read challenge ${id}:`, e);
+      client.send('room:error', { message: "Couldn't open this challenge right now — try again" });
+      return;
+    }
+    if (!this.clients.includes(client)) return;
+    const ended = !row || (row.status !== 'open' && row.status !== 'in_match')
+      || (row.status === 'open' && new Date(row.expires_at).getTime() <= Date.now());
+    if (ended) { client.send('room:error', { message: 'This challenge has ended' }); return; }
+    const pickFor = (m: PrizeMode): Prize | null => m === 'both' ? null : Number(m) as Prize;
+
+    // ── Its host, coming back ──
+    if (row.host_user_id === auth.userId) {
+      const room = Object.values(this.lobbyRooms).find(r => r.challenge?.id === id);
+      if (room) {
+        if (room.started) { client.send('room:error', { message: 'Game already started' }); return; }
+        console.log(`[challenges] host account ${auth.userId} back in challenge ${id} (room ${room.code})`);
+        this.seatJoiner(client, auth, room, {}, pickFor(room.prizeMode));
+        return;
+      }
+      if (row.status !== 'open') {
+        // in_match with no room here (a restart): only an admin release frees it.
+        console.error(`[challenges] host account ${auth.userId} opened challenge ${id}: in_match with no room — stuck`);
+        client.send('room:error', { message: "Your challenge can't be opened right now — try again later" });
+        return;
+      }
+      const prizeMode = await this.offeredPrizeOf(row);
+      if (!prizeMode) { client.send('room:error', { message: 'This challenge has ended' }); return; }
+      const fresh = this.materialiseRoom(row, prizeMode);
+      console.log(`[challenges] host account ${auth.userId} reopened challenge ${id} in a new room ${fresh.code}`);
+      this.seatJoiner(client, auth, fresh, {}, pickFor(prizeMode));
+      return;
+    }
+
+    // ── Anyone else: accepting it ──
+    if (row.status === 'in_match') { client.send('room:error', { message: 'Someone already accepted this challenge' }); return; }
+    const room = Object.values(this.lobbyRooms).find(r => r.challenge?.id === id);
+    if (room) {
+      // Its room is here: exactly room:join's checks and claim.
+      if (room.started) { client.send('room:error', { message: 'Game already started' }); return; }
+      if (room.kicked.has(auth.userId)) { client.send('room:error', { message: 'You were removed from this room by the host' }); return; }
+      if (room.challenge!.joinerUserId !== null || Object.keys(room.players).length >= SEATS_PER_ROOM) { client.send('room:error', { message: 'Someone already accepted this challenge' }); return; }
+      await this.claimAndSeat(client, auth, room, {}, pickFor(room.prizeMode));
+      return;
+    }
+    // No room for it (its host is away): claim it, then a room from the row.
+    const prizeMode = await this.offeredPrizeOf(row);
+    if (!prizeMode) { client.send('room:error', { message: 'This challenge has ended' }); return; }
+    if (this.challengeBusy.has(auth.userId)) return;
+    this.challengeBusy.add(auth.userId);
+    try {
+      const code = generateCode(this.lobbyRooms);
+      const attempt = claimChallenge(id, auth.userId, code);
+      let r: Awaited<typeof attempt>;
+      try {
+        r = await withTimeout(attempt);
+      } catch (e) {
+        console.error(`[challenges] account ${auth.userId}: claim of challenge ${id} failed:`, e);
+        attempt.then(late => { if (late.ok === true) void unclaimChallenge(id, auth.userId, 'claim_timeout').catch(() => {}); }, () => {});
+        client.send('room:error', { message: "Couldn't join right now — try again" });
+        return;
+      }
+      if (r.ok === false) {
+        client.send('room:error', { message: r.reason === 'not_found' ? 'This challenge has ended' : 'Someone already accepted this challenge' });
+        return;
+      }
+      // Still here, and nothing built a room for it (or took the code) meanwhile?
+      if (!this.clients.includes(client) || this.lobbyRooms[code] || Object.values(this.lobbyRooms).some(x => x.challenge?.id === id)) {
+        await unclaimChallenge(id, auth.userId, 'seat_gone').catch(e => console.error('[challenges] unclaim failed:', e));
+        if (this.clients.includes(client)) client.send('room:error', { message: 'This room is no longer available' });
+        return;
+      }
+      const fresh = this.materialiseRoom(row, prizeMode, code);
+      fresh.challenge!.joinerUserId = auth.userId;
+      console.log(`[challenges] account ${auth.userId} accepted challenge ${id} while its host is away (room ${code})`);
+      this.seatJoiner(client, auth, fresh, {}, pickFor(prizeMode));
+    } finally {
+      this.challengeBusy.delete(auth.userId);
+    }
+  }
+
+  // The row's prize, if it's still on offer (prizes.ts). Not any more: the
+  // challenge is closed (cancelled / prize_withdrawn) instead of opening a room.
+  private async offeredPrizeOf(row: Challenge): Promise<PrizeMode | null> {
+    const m = asOfferedPrizeMode(row.prize_key);
+    if (m) return m;
+    console.log(`[challenges] challenge ${row.id}: prize ${row.prize_key} is no longer offered — closed`);
+    await cancelChallenge(row.id, 'prize_withdrawn').catch(e => console.error(`[challenges] closing challenge ${row.id} failed:`, e));
+    return null;
+  }
+
+  // A live room for an open challenge that has none: a new code, the row's
+  // name and prize, its host as host (seated or not), an empty chat with one
+  // line, nobody ready, no payment — nothing comes back from the database but
+  // the name and the prize.
+  private materialiseRoom(row: Challenge, prizeMode: PrizeMode, code = generateCode(this.lobbyRooms)): LobbyRoomData {
+    const room: LobbyRoomData = {
+      code, name: row.name,
+      open: true, password: null, master: row.host_user_id,
+      players: {}, started: false, kicked: new Set<number>(),
+      chat: [{ player: '', content: 'Challenge reopened', system: true }], matchId: null, rematch: null, payment: null, test: false,
+      prizeMode, lastPrize: null,
+      challenge: { id: row.id, hostUserId: row.host_user_id, joinerUserId: null },
+    };
+    this.lobbyRooms[code] = room;
+    return room;
   }
 
   // room:cancel-challenge. The host's room on this server, if it has one, is

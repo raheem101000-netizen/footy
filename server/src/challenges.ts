@@ -213,6 +213,12 @@ export async function createChallenge(
   }
 }
 
+/** One challenge of this game by id (any status), or null. */
+export async function getChallenge(id: number, db: Queryable = pool): Promise<Challenge | null> {
+  const { rows } = await db.query(`SELECT * FROM challenges WHERE id = $1 AND game = $2`, [id, GAME]);
+  return one(rows);
+}
+
 export type ClaimResult =
   | { ok: true; challenge: Challenge }
   | { ok: false; reason: "not_found" | "not_open" | "expired" | "own_challenge" };
