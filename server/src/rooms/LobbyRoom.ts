@@ -5,7 +5,7 @@ import {
   REGION_CREATE_TIMEOUT_MS, Pings,
 } from "../regions";
 import { notifyNewRoom } from "../pushNotifications";
-import { challengesEnabled, createChallenge, cancelChallenge, claimChallenge, unclaimChallenge, withTimeout } from "../challenges";
+import { challengesEnabled, createChallenge, cancelChallenge, claimChallenge, unclaimChallenge, reopenChallenge, withTimeout } from "../challenges";
 import { Prize, PrizeMode, asOfferedPrize, asOfferedPrizeMode, OFFERED_PRIZES, TEN_TIER_OFFERED, entryFeeFor, prizeAmount } from "../prizes";
 import {
   entryFeesRequested, entryFeesReady, toCents, openPayment, cancelAttempt, attachMatch, creditRow, payWithCredit,
@@ -661,6 +661,15 @@ export class LobbyRoom extends Room {
     const h = this.held.get(pd.id);
     if (h) { this.held.delete(pd.id); h.reject(false); }
     const code = room.code;
+
+    // The challenge's opponent gave the seat up (Leave, kick, away too long,
+    // or a seat taken elsewhere) before any match was played from this room:
+    // the challenge is open again, with a fresh 14-day clock.
+    if (room.challenge && room.challenge.joinerUserId === userId && room.lastPrize === null) {
+      const id = room.challenge.id;
+      room.challenge.joinerUserId = null;
+      void reopenChallenge(id, 'joiner_left').catch(e => console.error(`[challenges] reopen of challenge ${id} failed:`, e));
+    }
 
     for (const p of Object.values(room.players)) p.ready = false;   // a Ready was for the old pairing
     this.sendToRoom(room, 'room:player:leave', { id: pd.id });
