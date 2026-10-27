@@ -5,7 +5,7 @@ import {
   REGION_CREATE_TIMEOUT_MS, Pings,
 } from "../regions";
 import { notifyNewRoom } from "../pushNotifications";
-import { challengesEnabled, createChallenge, cancelChallenge, cancelHostChallenge, claimChallenge, unclaimChallenge, reopenChallenge, finishChallenge, withTimeout } from "../challenges";
+import { challengesEnabled, createChallenge, cancelChallenge, cancelHostChallenge, claimChallenge, unclaimChallenge, reopenChallenge, finishChallenge, expireChallenges, withTimeout } from "../challenges";
 import { Prize, PrizeMode, asOfferedPrize, asOfferedPrizeMode, OFFERED_PRIZES, TEN_TIER_OFFERED, entryFeeFor, prizeAmount } from "../prizes";
 import {
   entryFeesRequested, entryFeesReady, toCents, openPayment, cancelAttempt, attachMatch, creditRow, payWithCredit,
@@ -26,6 +26,7 @@ const AWAY_AFTER_MS   = Number(process.env.FOOTY_AWAY_AFTER_MS) || 15_000;
 const HOST_HANDOFF_MS = Number(process.env.FOOTY_HOST_HANDOFF_MS) || 60_000;
 const SEAT_HOLD_MS    = Number(process.env.FOOTY_SEAT_HOLD_MS) || 12 * 60_000;
 const SWEEP_MS        = 2_000;
+const CHALLENGE_EXPIRY_MS = Number(process.env.FOOTY_CHALLENGE_EXPIRY_MS) || 60_000;
 // Fast path: Colyseus holds a dropped connection's session this long so the
 // SDK can resume it with its reconnection token. Account rejoin (above) is the
 // reliable fallback when that resume isn't possible.
@@ -179,6 +180,7 @@ export class LobbyRoom extends Room {
   private held = new Map<string, { reject: (e?: any) => void }>(); // pending token resumes, by connection
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private recoverTimer: ReturnType<typeof setInterval> | null = null;
+  private expiryTimer: ReturnType<typeof setInterval> | null = null;
 
   // Every lobby connection must be a logged-in tenten.run account.
   static async onAuth(token: string, options: any) {
@@ -195,6 +197,9 @@ export class LobbyRoom extends Room {
     const recover = () => recoverStranded("footy", id => this.liveAttempt(id) !== null)
       .catch(e => console.error("[entry-fees] recovery sweep failed:", e));
     if (entryFeesReady()) { setTimeout(recover, 5_000); this.recoverTimer = setInterval(recover, 60_000); }
+    // Open challenges: once a minute, open ones past their 14 days expire.
+    // Home server only (where the lobby is).
+    if (challengesEnabled() && isHomeServer()) this.expiryTimer = setInterval(() => void this.expireSweep(), CHALLENGE_EXPIRY_MS);
 
     // Multi-region: the page's measured pings to each region (on connect and
     // every 60 s); the match is started where both players' pings are best
@@ -447,6 +452,7 @@ export class LobbyRoom extends Room {
   onDispose() {
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     if (this.recoverTimer) clearInterval(this.recoverTimer);
+    if (this.expiryTimer) clearInterval(this.expiryTimer);
   }
 
 
@@ -623,6 +629,24 @@ export class LobbyRoom extends Room {
       this.challengeGone(row.id, 'Your challenge was cancelled.');
     } finally {
       this.challengeBusy.delete(auth.userId);
+    }
+  }
+
+  // Only 'open' rows expire (expireChallenges): never one with an opponent
+  // seated, so never during a payment window or a match.
+  private expiring = false;
+  private async expireSweep() {
+    if (this.expiring) return;
+    this.expiring = true;
+    try {
+      for (const row of await expireChallenges()) {
+        console.log(`[challenges] challenge ${row.id} expired (host account ${row.host_user_id})`);
+        this.challengeGone(row.id, 'Your challenge expired after 14 days.');
+      }
+    } catch (e) {
+      console.error('[challenges] expiry sweep failed (retried next minute):', e);
+    } finally {
+      this.expiring = false;
     }
   }
 
