@@ -5,7 +5,7 @@ import {
   REGION_CREATE_TIMEOUT_MS, Pings,
 } from "../regions";
 import { notifyNewRoom } from "../pushNotifications";
-import { challengesEnabled, createChallenge, cancelChallenge, withTimeout } from "../challenges";
+import { challengesEnabled, createChallenge, cancelChallenge, claimChallenge, unclaimChallenge, withTimeout } from "../challenges";
 import { Prize, PrizeMode, asOfferedPrize, asOfferedPrizeMode, OFFERED_PRIZES, TEN_TIER_OFFERED, entryFeeFor, prizeAmount } from "../prizes";
 import {
   entryFeesRequested, entryFeesReady, toCents, openPayment, cancelAttempt, attachMatch, creditRow, payWithCredit,
@@ -281,26 +281,10 @@ export class LobbyRoom extends Room {
         if (!pick) { client.send('room:pick-prize', { code: room.code, message: 'The host is open to both. Pick the prize' }); return; }
       }
 
-      this.releaseAccountSeat(auth.userId);
-      this.userMatch.delete(auth.userId);
-      const pd: PlayerData = {
-        id: client.sessionId,
-        userId: auth.userId,
-        name: auth.displayName || 'Player 2',
-        color: data.player?.color || '#4488FF',
-        ready: false, master: false, connected: true,
-        pick,
-        lastSeen: Date.now(), away: false, awaySince: 0
-      };
-      if (Object.keys(room.players).length === 0) { pd.master = true; room.master = auth.userId; }
-      // Someone new at the table: any earlier Ready was for a different pairing.
-      for (const p of Object.values(room.players)) p.ready = false;
-      room.players[auth.userId] = pd;
-      this.bindSeat(client, room, pd);
-      client.send('room:joined', { room: serializeRoom(room), player: serializePlayer(pd), chat: room.chat });
-      this.sendToRoom(room, 'room:player:join', { player: serializePlayer(pd) });
-      this.sendToRoom(room, 'room:state', serializeRoom(room));
-      this.broadcastList();
+      // Open challenge still waiting for its opponent: claimed in the database
+      // first (atomic, so only one joiner wins), then seated as below.
+      if (challengesEnabled() && room.challenge && room.challenge.joinerUserId === null) { void this.claimAndSeat(client, auth, room, data, pick); return; }
+      this.seatJoiner(client, auth, room, data, pick);
     });
 
     this.onMessage("room:ready", async (client: Client) => {
@@ -532,6 +516,73 @@ export class LobbyRoom extends Room {
         return;
       }
       this.openRoom(client, auth, data, name, false, '', prizeMode, challengeId);
+    } finally {
+      this.challengeBusy.delete(auth.userId);
+    }
+  }
+
+  // Seat a player who passed room:join's checks.
+  private seatJoiner(client: Client, auth: FootyAuth, room: LobbyRoomData, data: any, pick: Prize | null) {
+    this.releaseAccountSeat(auth.userId);
+    this.userMatch.delete(auth.userId);
+    const pd: PlayerData = {
+      id: client.sessionId,
+      userId: auth.userId,
+      name: auth.displayName || 'Player 2',
+      color: data.player?.color || '#4488FF',
+      ready: false, master: false, connected: true,
+      pick,
+      lastSeen: Date.now(), away: false, awaySince: 0
+    };
+    if (Object.keys(room.players).length === 0) { pd.master = true; room.master = auth.userId; }
+    // Someone new at the table: any earlier Ready was for a different pairing.
+    for (const p of Object.values(room.players)) p.ready = false;
+    room.players[auth.userId] = pd;
+    this.bindSeat(client, room, pd);
+    client.send('room:joined', { room: serializeRoom(room), player: serializePlayer(pd), chat: room.chat });
+    this.sendToRoom(room, 'room:player:join', { player: serializePlayer(pd) });
+    this.sendToRoom(room, 'room:state', serializeRoom(room));
+    this.broadcastList();
+  }
+
+  // room:join on an open challenge: claim the row, then seat. The claim is a
+  // database round-trip, so the room is checked again afterwards; a seat that
+  // can't be given then hands the claim straight back (same clock). The
+  // database unreachable → the join is refused (an unclaimed challenge must
+  // never get a second player), and a claim that lands late is handed back.
+  private async claimAndSeat(client: Client, auth: FootyAuth, room: LobbyRoomData, data: any, pick: Prize | null) {
+    if (this.challengeBusy.has(auth.userId)) return;
+    this.challengeBusy.add(auth.userId);
+    const challengeId = room.challenge!.id;
+    try {
+      const attempt = claimChallenge(challengeId, auth.userId, room.code);
+      let r: Awaited<typeof attempt>;
+      try {
+        r = await withTimeout(attempt);
+      } catch (e) {
+        console.error(`[challenges] account ${auth.userId}: claim of challenge ${challengeId} failed:`, e);
+        attempt.then(late => { if (late.ok === true) void unclaimChallenge(challengeId, auth.userId, 'claim_timeout').catch(() => {}); }, () => {});
+        client.send('room:error', { message: "Couldn't join right now — try again" });
+        return;
+      }
+      if (r.ok === false) {
+        if (r.reason === 'not_open' || r.reason === 'expired') client.send('room:error', { message: 'Someone already accepted this challenge' });
+        else { console.error(`[challenges] account ${auth.userId}: claim of challenge ${challengeId} refused (${r.reason})`); client.send('room:error', { message: 'Room not found' }); }
+        return;
+      }
+      // Still the same room, still waiting, still room for one more, and the
+      // joiner's page still here?
+      const stillOk = this.lobbyRooms[room.code] === room && room.challenge?.id === challengeId
+        && room.challenge.joinerUserId === null && !room.started && !room.kicked.has(auth.userId)
+        && !room.players[auth.userId] && Object.keys(room.players).length > 0
+        && Object.keys(room.players).length < SEATS_PER_ROOM && this.clients.includes(client);
+      if (!stillOk) {
+        await unclaimChallenge(challengeId, auth.userId, 'seat_gone').catch(e => console.error('[challenges] unclaim failed:', e));
+        if (this.clients.includes(client)) client.send('room:error', { message: 'This room is no longer available' });
+        return;
+      }
+      room.challenge.joinerUserId = auth.userId;
+      this.seatJoiner(client, auth, room, data, pick);
     } finally {
       this.challengeBusy.delete(auth.userId);
     }
