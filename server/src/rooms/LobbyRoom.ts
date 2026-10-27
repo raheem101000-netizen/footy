@@ -269,6 +269,9 @@ export class LobbyRoom extends Room {
       if (room.kicked.has(auth.userId)) { client.send('room:error', { message: 'You were removed from this room by the host' }); return; }
       // Capacity counts distinct accounts, never connections.
       if (Object.keys(room.players).length >= SEATS_PER_ROOM) { client.send('room:error', { message: 'Room is full' }); return; }
+      // Accepted challenge: its two seats are the host's and the opponent's,
+      // even while the host is away from the room.
+      if (room.challenge && room.challenge.joinerUserId !== null && auth.userId !== room.challenge.hostUserId) { client.send('room:error', { message: 'Room is full' }); return; }
 
       // Private room: the host's password (a player already seated rejoins above without it).
       if (room.password && data?.password !== room.password) {
@@ -549,6 +552,7 @@ export class LobbyRoom extends Room {
       lastSeen: Date.now(), away: false, awaySince: 0
     };
     if (Object.keys(room.players).length === 0) { pd.master = true; room.master = auth.userId; }
+    else if (room.challenge && room.master === auth.userId) pd.master = true;   // the challenge's host is back
     // Someone new at the table: any earlier Ready was for a different pairing.
     for (const p of Object.values(room.players)) p.ready = false;
     room.players[auth.userId] = pd;
@@ -755,9 +759,12 @@ export class LobbyRoom extends Room {
 
     if (Object.keys(room.players).length === 0) {
       // The last player left: the room goes at once (as FIFA), and the list
-      // below is updated for everyone.
+      // below is updated for everyone. An open challenge's row stays open —
+      // the host leaving never ends it.
       delete this.lobbyRooms[code];
-    } else if (room.master === userId) {
+    } else if (room.master === userId && !room.challenge) {
+      // (A challenge room keeps its host as host while they're away: the
+      // opponent never takes it over.)
       const next = Object.values(room.players).find(p => !p.away) || Object.values(room.players)[0];
       this.setMaster(room, next);
     }
@@ -810,7 +817,7 @@ export class LobbyRoom extends Room {
         }
       }
       const host = room.players[room.master];
-      if (host && host.away && now - host.awaySince > HOST_HANDOFF_MS) {
+      if (host && host.away && now - host.awaySince > HOST_HANDOFF_MS && !room.challenge) {
         const next = Object.values(room.players).find(p => !p.away);
         if (next) { this.setMaster(room, next); changed = true; }
       }
