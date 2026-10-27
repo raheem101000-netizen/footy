@@ -5,7 +5,7 @@ import {
   REGION_CREATE_TIMEOUT_MS, Pings,
 } from "../regions";
 import { notifyNewRoom } from "../pushNotifications";
-import { challengesEnabled, createChallenge, cancelChallenge, claimChallenge, unclaimChallenge, reopenChallenge, withTimeout } from "../challenges";
+import { challengesEnabled, createChallenge, cancelChallenge, claimChallenge, unclaimChallenge, reopenChallenge, finishChallenge, withTimeout } from "../challenges";
 import { Prize, PrizeMode, asOfferedPrize, asOfferedPrizeMode, OFFERED_PRIZES, TEN_TIER_OFFERED, entryFeeFor, prizeAmount } from "../prizes";
 import {
   entryFeesRequested, entryFeesReady, toCents, openPayment, cancelAttempt, attachMatch, creditRow, payWithCredit,
@@ -924,6 +924,13 @@ export class LobbyRoom extends Room {
           console.error(`[entry-fees] couldn't attach ${pw.attemptId} to match ${gameRoom.roomId}:`, e));
         console.log(`[entry-fees] room ${room.code}: both paid $${pw.entry} — match ${gameRoom.roomId} started`);
       }
+      // Open challenge: the match is on, so the challenge was played. The room
+      // forgets it — a rematch here never touches the row again.
+      if (room.challenge) {
+        const id = room.challenge.id;
+        room.challenge = null;
+        this.finishChallengeSoon(id, `footymp:${gameRoom.roomId}`);
+      }
       room.lastPrize = agreed;
       this.sendToRoom(room, 'room:game:start', {
         code: gameRoom.roomId,
@@ -957,6 +964,23 @@ export class LobbyRoom extends Room {
         client?.send('room:error', { message: 'Failed to start game' });
       }
     }
+  }
+
+  // in_match → finished for a launched match. Retried a few times: a row left
+  // in_match after its match was played has nothing to clear it (no reconcile).
+  private finishChallengeSoon(id: number, matchKey: string, attempt = 0) {
+    const RETRY_MS = [5_000, 30_000, 120_000];
+    finishChallenge(id, matchKey).then(row => {
+      if (row) console.log(`[challenges] challenge ${id} finished — match ${matchKey}`);
+      else console.error(`[challenges] challenge ${id} was not in_match when match ${matchKey} started — left as it is`);
+    }, e => {
+      if (attempt < RETRY_MS.length) {
+        console.error(`[challenges] finishing challenge ${id} failed — retrying:`, e);
+        setTimeout(() => this.finishChallengeSoon(id, matchKey, attempt + 1), RETRY_MS[attempt]);
+      } else {
+        console.error(`[challenges] challenge ${id} is STILL in_match although match ${matchKey} was played — finish it by hand:`, e);
+      }
+    });
   }
 
   // The match room: on this server (single server), or — multi-region — on
