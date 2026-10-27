@@ -26,6 +26,24 @@ import { pool } from "./db";
  */
 
 export const GAME = "footy";
+
+// The lobby's challenge hooks (rooms/LobbyRoom.ts) are all gated on this:
+// unset / anything but "true" = the lobby behaves exactly as before, and no
+// challenge row is ever written.
+export function challengesEnabled(): boolean {
+  return process.env.CHALLENGES_ENABLED === "true";
+}
+
+// The lobby never waits on the database for long: a call that takes longer
+// is treated as the database being unreachable.
+export const DB_TIMEOUT_MS = 3_000;
+export class DbTimeout extends Error {}
+export function withTimeout<T>(p: Promise<T>, ms = DB_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new DbTimeout(`database call took over ${ms} ms`)), ms);
+    p.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+  });
+}
 export const NAME_MAX = 24;
 export const OPEN_DAYS = 14;
 const MIGRATION_LOCK = 727274;   // the shared-table migration lock
@@ -223,6 +241,21 @@ export async function reopenChallenge(id: number, reason: string, db: Queryable 
       WHERE id = $1 AND game = $3 AND status = 'in_match'
       RETURNING *`,
     [id, reason, GAME], "reopened", "NULL", "jsonb_build_object('reason', $2::text)"));
+}
+
+/**
+ * Undo a claim that never turned into a seat (the room filled, closed or the
+ * joiner's connection went while the claim was in flight): in_match → open
+ * exactly as it was — same clock, same reopen_count (nobody actually joined).
+ * Only that joiner's claim.
+ */
+export async function unclaimChallenge(id: number, joinerUserId: number, reason: string, db: Queryable = pool): Promise<Challenge | null> {
+  return one(await transition(db,
+    `UPDATE challenges
+        SET status = 'open', joiner_user_id = NULL, joined_at = NULL, room_code = NULL
+      WHERE id = $1 AND game = $4 AND status = 'in_match' AND joiner_user_id = $2
+      RETURNING *`,
+    [id, joinerUserId, reason, GAME], "reopened", "$2::int", "jsonb_build_object('reason', $3::text, 'undo', true)"));
 }
 
 /** The match was played and settled: in_match → finished (final). */
