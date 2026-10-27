@@ -284,7 +284,7 @@ body{background:radial-gradient(ellipse 70% 50% at 50% 0%,rgba(212,175,55,.14),t
   <div style="background:#111;border:1px solid rgba(212,175,55,0.4);border-radius:12px;padding:28px;max-width:380px;text-align:center;font-family:'Space Grotesk',sans-serif;">
     <div style="font-family:'Press Start 2P',monospace;font-size:11px;color:#d4af37;margin-bottom:16px;">LOG IN TO PLAY</div>
     <div id="login-gate-msg" style="font-size:13px;color:rgba(255,255,255,0.6);line-height:1.6;margin-bottom:20px;">HEDDY pays real prizes, so you need a tenten.run account. Log in on tenten.run, then press PLAY on HEDDY.</div>
-    <a href="https://www.tenten.run/?play=footymp" style="display:inline-block;background:#d4af37;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700;">Log in on tenten.run to play</a>
+    <a id="login-gate-link" href="https://www.tenten.run/?play=footymp" style="display:inline-block;background:#d4af37;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700;">Log in on tenten.run to play</a>
   </div>
 </div>
 
@@ -354,6 +354,26 @@ body{background:radial-gradient(ellipse 70% 50% at 50% 0%,rgba(212,175,55,.14),t
   }
 })();
 let footyAuth = window.footyAuth();
+// ── Open challenges: ?challenge=<id> (a challenge board's link) ─────────────
+// Kept for this page load and taken out of the address bar. Once connected,
+// the usual seat rejoin runs first; a match still being played wins (the
+// challenge is dropped); otherwise the lobby is asked for the challenge.
+let pendingChallenge = null, openingChallenge = false;
+(function(){
+  const q = new URLSearchParams(location.search), c = q.get('challenge');
+  if (c === null) return;
+  if (/^\d{1,9}$/.test(c)) pendingChallenge = Number(c);
+  q.delete('challenge');
+  history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
+})();
+function sendPendingChallenge(){
+  if (!pendingChallenge) return;
+  const id = pendingChallenge; pendingChallenge = null; openingChallenge = true;
+  setConnNotice('Opening the challenge…');
+  socket.emit('room:challenge', { id });
+}
+// Logged out: tenten.run logs in and comes back here with the same challenge.
+if (pendingChallenge) document.getElementById('login-gate-link').href = 'https://www.tenten.run/?play=footymp&challenge=' + pendingChallenge;
 // Testing helper: open the lobby with ?testlink=1 to show this device's login as a link
 // (for running test players). Only shown on request; nothing else changes.
 if (/[?&]testlink=1/.test(location.search) && footyAuth) {
@@ -437,7 +457,7 @@ socket.on('connect', ()=>{
   if (!isSuperseded()) {
     if (myRoom || remembered()) setConnNotice('Rejoining your room…');
     socket.emit('room:rejoin', { code: (myRoom && myRoom.code) || remembered() });
-  }
+  } else sendPendingChallenge();
 });
 socket.on('disconnect', ()=>status('Disconnected','err'));
 socket.on('drop', ()=>{ status('Reconnecting…','err'); setConnNotice(myRoom ? 'Connection lost — reconnecting. Your seat is kept.' : 'Connection lost — reconnecting…'); });
@@ -449,6 +469,7 @@ socket.on('room:rejoin:none', ()=>{
   remember(null); setConnNotice('');
   if (myRoom) backToList();
   if (had) status('Your room has closed — create or join a new one','err');
+  sendPendingChallenge();
 });
 // Reached with the browser's Back/Forward (or restored from the back/forward
 // cache)? Then the player was leaving: a live match doesn't pull this page
@@ -458,6 +479,7 @@ let arrivedByBackForward = (((performance.getEntriesByType && performance.getEnt
 window.addEventListener('pageshow', e=>{ if (e.persisted) arrivedByBackForward = true; });
 // Our account's match is still being played: back to it.
 socket.on('room:match', ({code, region})=>{
+  pendingChallenge = null;   // the match being played wins over a challenge link
   remember(null);
   if (arrivedByBackForward) { setConnNotice('Your match is still on — reload this page to go back to it.'); return; }
   setConnNotice('Your match is still on — taking you back…'); window.location.href='/footy-match.html?room='+encodeURIComponent(code)+srvParam(region);
@@ -468,6 +490,7 @@ socket.on('room:released', ({message})=>{ remember(null); backToList(); setConnN
 socket.on('room:superseded', ({message})=>{ setSuperseded(true); backToList(); setConnNotice((message||'You opened this room somewhere else.')+' Join it again here to move it back.'); });
 socket.on('connect_error', (e)=>{ status('Cannot connect to server','err'); if (e && (e.code === 401 || /log in|login has expired/i.test(e.message || ''))) { try { localStorage.removeItem('footymp_auth'); sessionStorage.removeItem('footymp_auth'); } catch (_) {} if (e.message) document.getElementById('login-gate-msg').textContent = e.message; document.getElementById('login-gate').style.display = 'flex'; } });
 socket.on('room:error', ({message})=>{ status(message,'err');
+  if(openingChallenge){ openingChallenge=false; setConnNotice(message); }
   if(document.getElementById('join-modal').classList.contains('open')) document.getElementById('join-error').textContent=message;
   if(document.getElementById('modal-overlay').classList.contains('open')) document.getElementById('create-error').textContent=message;
   if(document.getElementById('pick-modal').classList.contains('open')) document.getElementById('pick-error').textContent=message; });
@@ -483,7 +506,7 @@ socket.on('room:update', ()=>socket.emit('room:list'));
 socket.on('room:kicked', ({message})=>{ remember(null); backToList(); status(message||'You were removed by the host','err'); });
 socket.on('room:created', ({room,chat})=>{ renderChat(chat); setSuperseded(false); remember(room.code); setConnNotice(''); closeCreateModal(); myRoom=room; isMaster=true; isReady=false; showDetail(); renderDetail(room); status(room.open===false?('Room created — code: '+room.code):'Public room created','ok'); });
 // Joined — or our own seat handed back (rejoined): seat, ready state and host role kept.
-socket.on('room:joined',  ({room,player,rejoined,chat})=>{ renderChat(chat); setSuperseded(false); remember(room.code); setConnNotice(''); closeJoinModal(); closePickModal(); myRoom=room; isMaster=!!(player&&player.master); isReady=!!(player&&player.ready); showDetail(); renderDetail(room); status(rejoined?('Back in room '+room.code):('Joined room '+room.code),'ok'); if(pendingReady){ pendingReady=false; isReady=true; socket.emit('room:ready'); updateActions(); status('Payment confirmed — ready!','ok'); } });
+socket.on('room:joined',  ({room,player,rejoined,chat})=>{ openingChallenge=false; if(rejoined) setTimeout(sendPendingChallenge,0); renderChat(chat); setSuperseded(false); remember(room.code); setConnNotice(''); closeJoinModal(); closePickModal(); myRoom=room; isMaster=!!(player&&player.master); isReady=!!(player&&player.ready); showDetail(); renderDetail(room); status(rejoined?('Back in room '+room.code):('Joined room '+room.code),'ok'); if(pendingReady){ pendingReady=false; isReady=true; socket.emit('room:ready'); updateActions(); status('Payment confirmed — ready!','ok'); } });
 socket.on('room:state',   room=>{
   if(!myRoom || myRoom.code!==room.code) return;
   myRoom=room;
