@@ -5,6 +5,7 @@ import {
   REGION_CREATE_TIMEOUT_MS, Pings,
 } from "../regions";
 import { notifyNewRoom } from "../pushNotifications";
+import { challengesEnabled, createChallenge, cancelChallenge, withTimeout } from "../challenges";
 import { Prize, PrizeMode, asOfferedPrize, asOfferedPrizeMode, OFFERED_PRIZES, TEN_TIER_OFFERED, entryFeeFor, prizeAmount } from "../prizes";
 import {
   entryFeesRequested, entryFeesReady, toCents, openPayment, cancelAttempt, attachMatch, creditRow, payWithCredit,
@@ -81,6 +82,10 @@ interface LobbyRoomData {
   // Stripe's webhook. Nothing about the room can change while it's open.
   payment: PaymentWindow | null;
   test?: boolean;               // a test-bot room: hidden, bots only, never paid (auth.ts)
+  // Open challenge (challenges.ts; CHALLENGES_ENABLED only): the row this
+  // public room is the live copy of, and the account that claimed it (null
+  // while it's open). Absent: an ordinary room, exactly as before.
+  challenge?: { id: number; joinerUserId: number | null } | null;
 }
 
 interface PaymentWindow {
@@ -236,42 +241,10 @@ export class LobbyRoom extends Room {
       if (priv && !password.trim()) { client.send('room:error', { message: 'Enter a password for a private room' }); return; }
       const prizeMode = asOfferedPrizeMode(data?.prizeMode);
       if (!prizeMode) { client.send('room:error', { message: 'Pick a prize first' }); return; }
-      // One seat per account: creating a room gives up a seat held elsewhere.
-      this.releaseAccountSeat(auth.userId);
-      this.userMatch.delete(auth.userId);
-      const code = generateCode(this.lobbyRooms);
-      const pd: PlayerData = {
-        id: client.sessionId,
-        userId: auth.userId,
-        name: auth.displayName || 'Player 1',
-        color: data.player?.color || '#b450ff',
-        ready: false, master: true, connected: true,
-        // Fixed room: the host's pick is the room's prize; "both": no pick yet.
-        pick: prizeMode === 'both' ? null : Number(prizeMode) as Prize,
-        lastSeen: Date.now(), away: false, awaySince: 0
-      };
-      const room: LobbyRoomData = {
-        code, name,
-        open: !priv, password: priv ? password : null, master: auth.userId,
-        players: { [auth.userId]: pd }, started: false, kicked: new Set<number>(),
-        chat: [], matchId: null, rematch: null, payment: null, test: !!auth.testBot,
-        prizeMode, lastPrize: null
-      };
-      this.lobbyRooms[code] = room;
-      this.bindSeat(client, room, pd);
-      client.send('room:created', { room: serializeRoom(room), player: serializePlayer(pd), chat: room.chat });
-      this.broadcastList();
-      // Match alert to everyone who turned them on at tenten.run — public rooms
-      // only (a rematch reuses its room, so it never comes through here).
-      // Fire-and-forget: never delays or breaks the room.
-      if (!priv && !auth.testBot) {
-        void notifyNewRoom('footy', {
-          title: '⚽ HEDDY — opponent waiting',
-          body: 'Tap to play — win real cash',
-          url: '/?play=footymp',
-          tag: 'footy-new-room',
-        });
-      }
+      // Open challenges on: a public room is first written as a challenge row
+      // (one live per host). Off, private, or a test bot: exactly as before.
+      if (challengesEnabled() && !priv && !auth.testBot) { void this.createChallengeRoom(client, auth, data, name, prizeMode); return; }
+      this.openRoom(client, auth, data, name, priv, password, prizeMode, null);
     });
 
     // Old Stripe flow (unused while FREE_PLAY): a player leaving for checkout
@@ -482,6 +455,86 @@ export class LobbyRoom extends Room {
   onDispose() {
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     if (this.recoverTimer) clearInterval(this.recoverTimer);
+  }
+
+
+  // ── Rooms ──────────────────────────────────────────────────────────────────
+
+  // Build the room and seat its host (room:create). challengeId: the open
+  // challenge row it's the live copy of, or null for an ordinary room.
+  private openRoom(client: Client, auth: FootyAuth, data: any, name: string, priv: boolean, password: string, prizeMode: PrizeMode, challengeId: number | null) {
+    // One seat per account: creating a room gives up a seat held elsewhere.
+    this.releaseAccountSeat(auth.userId);
+    this.userMatch.delete(auth.userId);
+    const code = generateCode(this.lobbyRooms);
+    const pd: PlayerData = {
+      id: client.sessionId,
+      userId: auth.userId,
+      name: auth.displayName || 'Player 1',
+      color: data.player?.color || '#b450ff',
+      ready: false, master: true, connected: true,
+      // Fixed room: the host's pick is the room's prize; "both": no pick yet.
+      pick: prizeMode === 'both' ? null : Number(prizeMode) as Prize,
+      lastSeen: Date.now(), away: false, awaySince: 0
+    };
+    const room: LobbyRoomData = {
+      code, name,
+      open: !priv, password: priv ? password : null, master: auth.userId,
+      players: { [auth.userId]: pd }, started: false, kicked: new Set<number>(),
+      chat: [], matchId: null, rematch: null, payment: null, test: !!auth.testBot,
+      prizeMode, lastPrize: null,
+      ...(challengeId !== null ? { challenge: { id: challengeId, joinerUserId: null } } : {}),
+    };
+    this.lobbyRooms[code] = room;
+    this.bindSeat(client, room, pd);
+    client.send('room:created', { room: serializeRoom(room), player: serializePlayer(pd), chat: room.chat });
+    this.broadcastList();
+    // Match alert to everyone who turned them on at tenten.run — public rooms
+    // only (a rematch reuses its room, so it never comes through here).
+    // Fire-and-forget: never delays or breaks the room.
+    if (!priv && !auth.testBot) {
+      void notifyNewRoom('footy', {
+        title: '⚽ HEDDY — opponent waiting',
+        body: 'Tap to play — win real cash',
+        url: '/?play=footymp',
+        tag: 'footy-new-room',
+      });
+    }
+  }
+
+  // room:create with open challenges on (public room, real player): the row
+  // first. The host already has a live HEDDY challenge → no room. The database
+  // unreachable (error or over DB_TIMEOUT_MS) → an ordinary room as before,
+  // and a row that lands late is cancelled so it never lists without a room.
+  private challengeBusy = new Set<number>();   // one create/join at a time per account
+  private async createChallengeRoom(client: Client, auth: FootyAuth, data: any, name: string, prizeMode: PrizeMode) {
+    if (this.challengeBusy.has(auth.userId)) return;
+    this.challengeBusy.add(auth.userId);
+    try {
+      const p: Prize = prizeMode === 'both' ? OFFERED_PRIZES[0] : Number(prizeMode) as Prize;
+      const attempt = createChallenge({
+        hostUserId: auth.userId, name, prizeKey: prizeMode,
+        entryCents: toCents(entryFeeFor(p)), prizeCents: toCents(prizeAmount(p)),
+      });
+      let challengeId: number | null = null;
+      try {
+        const r = await withTimeout(attempt);
+        if (r.ok === true) challengeId = r.challenge.id;
+        else if (r.reason === 'already_live') { client.send('room:error', { message: 'You already have an open HEDDY challenge' }); return; }
+        else console.error(`[challenges] account ${auth.userId}: create refused (${r.reason}) — ordinary room instead`);
+      } catch (e) {
+        console.error(`[challenges] account ${auth.userId}: database unreachable — ordinary room instead:`, e);
+        attempt.then(r => { if (r.ok === true) void cancelChallenge(r.challenge.id, 'create_timeout').catch(() => {}); }, () => {});
+      }
+      // The host's page went away while the row was being written.
+      if (!this.clients.includes(client)) {
+        if (challengeId !== null) await cancelChallenge(challengeId, 'host_gone').catch(e => console.error('[challenges] cancel failed:', e));
+        return;
+      }
+      this.openRoom(client, auth, data, name, false, '', prizeMode, challengeId);
+    } finally {
+      this.challengeBusy.delete(auth.userId);
+    }
   }
 
   // ── Seats ──────────────────────────────────────────────────────────────────
