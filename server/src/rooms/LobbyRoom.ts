@@ -5,7 +5,7 @@ import {
   REGION_CREATE_TIMEOUT_MS, Pings,
 } from "../regions";
 import { notifyNewRoom } from "../pushNotifications";
-import { challengesEnabled, createChallenge, cancelChallenge, claimChallenge, unclaimChallenge, reopenChallenge, finishChallenge, withTimeout } from "../challenges";
+import { challengesEnabled, createChallenge, cancelChallenge, cancelHostChallenge, claimChallenge, unclaimChallenge, reopenChallenge, finishChallenge, withTimeout } from "../challenges";
 import { Prize, PrizeMode, asOfferedPrize, asOfferedPrizeMode, OFFERED_PRIZES, TEN_TIER_OFFERED, entryFeeFor, prizeAmount } from "../prizes";
 import {
   entryFeesRequested, entryFeesReady, toCents, openPayment, cancelAttempt, attachMatch, creditRow, payWithCredit,
@@ -85,7 +85,7 @@ interface LobbyRoomData {
   // Open challenge (challenges.ts; CHALLENGES_ENABLED only): the row this
   // public room is the live copy of, and the account that claimed it (null
   // while it's open). Absent: an ordinary room, exactly as before.
-  challenge?: { id: number; joinerUserId: number | null } | null;
+  challenge?: { id: number; hostUserId: number; joinerUserId: number | null } | null;
 }
 
 interface PaymentWindow {
@@ -391,6 +391,14 @@ export class LobbyRoom extends Room {
       if (seat && seat.room.rematch) this.addRematchPress(seat.room, seat.pd.userId);
     });
 
+    // Open challenges: the host takes their own challenge down (their room
+    // closes with it). Never while entries are being paid or a match is
+    // starting, and not once an opponent has accepted — Cancel stays away
+    // from money.
+    this.onMessage("room:cancel-challenge", (client: Client) => {
+      if (challengesEnabled()) void this.cancelOwnChallenge(client);
+    });
+
     // The only way to give a seat up yourself.
     this.onMessage("room:leave", (client: Client) => {
       const seat = this.seatOf(client);
@@ -467,7 +475,7 @@ export class LobbyRoom extends Room {
       players: { [auth.userId]: pd }, started: false, kicked: new Set<number>(),
       chat: [], matchId: null, rematch: null, payment: null, test: !!auth.testBot,
       prizeMode, lastPrize: null,
-      ...(challengeId !== null ? { challenge: { id: challengeId, joinerUserId: null } } : {}),
+      ...(challengeId !== null ? { challenge: { id: challengeId, hostUserId: auth.userId, joinerUserId: null } } : {}),
     };
     this.lobbyRooms[code] = room;
     this.bindSeat(client, room, pd);
@@ -585,6 +593,49 @@ export class LobbyRoom extends Room {
       this.seatJoiner(client, auth, room, data, pick);
     } finally {
       this.challengeBusy.delete(auth.userId);
+    }
+  }
+
+  // room:cancel-challenge. The host's room on this server, if it has one, is
+  // checked first; with no room (the host left it), their open row is
+  // cancelled by host.
+  private async cancelOwnChallenge(client: Client) {
+    const auth = client.auth as FootyAuth;
+    if (this.challengeBusy.has(auth.userId)) return;
+    const room = Object.values(this.lobbyRooms).find(r => r.challenge?.hostUserId === auth.userId);
+    if (room && (room.payment || room.started)) { client.send('room:error', { message: "Can't cancel while entries are being paid" }); return; }
+    if (room && room.challenge!.joinerUserId !== null) { client.send('room:error', { message: 'Someone has accepted — remove them first to cancel' }); return; }
+    this.challengeBusy.add(auth.userId);
+    try {
+      const attempt = room ? cancelChallenge(room.challenge!.id, 'host_cancelled', auth.userId) : cancelHostChallenge(auth.userId, 'host_cancelled');
+      let row: Awaited<typeof attempt>;
+      try {
+        row = await withTimeout(attempt);
+      } catch (e) {
+        console.error(`[challenges] account ${auth.userId}: cancel failed:`, e);
+        attempt.then(late => { if (late) this.challengeGone(late.id, 'Your challenge was cancelled.'); }, () => {});
+        client.send('room:error', { message: "Couldn't cancel right now — try again" });
+        return;
+      }
+      if (!row) { client.send('room:error', { message: room ? 'Someone has accepted — remove them first to cancel' : 'You have no open HEDDY challenge' }); return; }
+      console.log(`[challenges] challenge ${row.id} cancelled by its host (account ${auth.userId})`);
+      client.send('room:challenge:cancelled', { id: row.id });
+      this.challengeGone(row.id, 'Your challenge was cancelled.');
+    } finally {
+      this.challengeBusy.delete(auth.userId);
+    }
+  }
+
+  // A challenge ended without a match (cancelled, expired): its room on this
+  // server, if any, closes — the room is ordinary from here, so its seats go
+  // the usual way.
+  private challengeGone(id: number, message: string) {
+    const room = Object.values(this.lobbyRooms).find(r => r.challenge?.id === id);
+    if (!room) return;
+    room.challenge = null;
+    for (const pd of Object.values(room.players)) {
+      this.clients.find(c => c.sessionId === pd.id)?.send('room:released', { message });
+      this.releaseSeat(room, pd.userId);
     }
   }
 

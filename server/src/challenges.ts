@@ -281,6 +281,19 @@ export async function cancelChallenge(id: number, reason: string, byUserId: numb
     [id, reason, byUserId, GAME], "cancelled", "$3::int", "jsonb_build_object('reason', $2::text)"));
 }
 
+/**
+ * The host takes down their own open challenge without naming it — at most
+ * one is live per host and game (for a host who has no room for it any more).
+ */
+export async function cancelHostChallenge(hostUserId: number, reason: string, db: Queryable = pool): Promise<Challenge | null> {
+  return one(await transition(db,
+    `UPDATE challenges
+        SET status = 'cancelled', close_reason = $2, closed_at = now()
+      WHERE host_user_id = $1 AND game = $3 AND status = 'open'
+      RETURNING *`,
+    [hostUserId, reason, GAME], "cancelled", "$1::int", "jsonb_build_object('reason', $2::text)"));
+}
+
 /** Sweep: every open challenge of this game past expires_at → expired (final). */
 export async function expireChallenges(db: Queryable = pool): Promise<Challenge[]> {
   return transition(db,
