@@ -5,7 +5,7 @@ import {
   REGION_CREATE_TIMEOUT_MS, Pings,
 } from "../regions";
 import { notifyNewRoom } from "../pushNotifications";
-import { challengesEnabled, createChallenge, cancelChallenge, cancelHostChallenge, claimChallenge, unclaimChallenge, reopenChallenge, finishChallenge, expireChallenges, getChallenge, withTimeout, Challenge } from "../challenges";
+import { challengesEnabled, createChallenge, cancelChallenge, cancelHostChallenge, claimChallenge, unclaimChallenge, reopenChallenge, finishChallenge, expireChallenges, getChallenge, listOpenChallenges, withTimeout, Challenge, OpenChallenge } from "../challenges";
 import { Prize, PrizeMode, asOfferedPrize, asOfferedPrizeMode, OFFERED_PRIZES, TEN_TIER_OFFERED, entryFeeFor, prizeAmount } from "../prizes";
 import {
   entryFeesRequested, entryFeesReady, toCents, openPayment, cancelAttempt, attachMatch, creditRow, payWithCredit,
@@ -157,6 +157,7 @@ function serializeRoom(r: LobbyRoomData) {
       waiting: players.filter(p => !r.rematch!.by.has(p.userId)).map(p => p.name),
     } : null,
     entryFees: entryFeesRequested(),
+    ...(r.challenge ? { challenge: { id: r.challenge.id, hostId: r.challenge.hostUserId } } : {}),
     payment: r.payment ? {
       prize: r.payment.prize, entry: r.payment.entry, deadline: r.payment.deadline,
       paid: players.filter(p => r.payment!.paid.has(p.userId)).map(p => p.id),
@@ -181,6 +182,7 @@ export class LobbyRoom extends Room {
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private recoverTimer: ReturnType<typeof setInterval> | null = null;
   private expiryTimer: ReturnType<typeof setInterval> | null = null;
+  private openCacheInterval: ReturnType<typeof setInterval> | null = null;
 
   // Every lobby connection must be a logged-in tenten.run account.
   static async onAuth(token: string, options: any) {
@@ -200,6 +202,8 @@ export class LobbyRoom extends Room {
     // Open challenges: once a minute, open ones past their 14 days expire.
     // Home server only (where the lobby is).
     if (challengesEnabled() && isHomeServer()) this.expiryTimer = setInterval(() => void this.expireSweep(), CHALLENGE_EXPIRY_MS);
+    // …and the lobby list's open challenges, kept fresh (serializeList).
+    if (challengesEnabled() && isHomeServer()) { this.refreshOpenCache(); this.openCacheInterval = setInterval(() => this.refreshOpenCache(), 15_000); }
 
     // Multi-region: the page's measured pings to each region (on connect and
     // every 60 s); the match is started where both players' pings are best
@@ -462,6 +466,8 @@ export class LobbyRoom extends Room {
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     if (this.recoverTimer) clearInterval(this.recoverTimer);
     if (this.expiryTimer) clearInterval(this.expiryTimer);
+    if (this.openCacheInterval) clearInterval(this.openCacheInterval);
+    if (this.openCacheTimer) clearTimeout(this.openCacheTimer);
   }
 
 
@@ -799,8 +805,9 @@ export class LobbyRoom extends Room {
   // server, if any, closes — the room is ordinary from here, so its seats go
   // the usual way.
   private challengeGone(id: number, message: string) {
+    this.openCache = this.openCache.filter(c => c.id !== id);   // off the list's open challenges at once
     const room = Object.values(this.lobbyRooms).find(r => r.challenge?.id === id);
-    if (!room) return;
+    if (!room) { this.broadcastList(); return; }
     room.challenge = null;
     for (const pd of Object.values(room.players)) {
       this.clients.find(c => c.sessionId === pd.id)?.send('room:released', { message });
@@ -1327,15 +1334,53 @@ export class LobbyRoom extends Room {
   }
 
   private serializeList() {
-    return Object.values(this.lobbyRooms)
+    const list: any[] = Object.values(this.lobbyRooms)
       // Like Puz Royale: private rooms are listed too, with a lock; joining
       // one needs its password.
       .filter(r => !r.started && !r.test)
       .map(r => ({
         id: r.code, name: r.name, open: r.open, locked: !!r.password,
         players: Object.keys(r.players).length,
-        prizeMode: r.prizeMode
+        prizeMode: r.prizeMode,
+        ...(r.challenge ? { challenge: {
+          id: r.challenge.id, hostId: r.challenge.hostUserId,
+          host: this.openCache.find(c => c.id === r.challenge!.id)?.host_display_name ?? r.players[r.challenge.hostUserId]?.name ?? null,
+          inMatch: r.challenge.joinerUserId !== null, dormant: false,
+        } } : {}),
       }));
+    if (!challengesEnabled()) return list;
+    // Open challenges with no live room here (their host is away): listed so
+    // anyone can open them by id (room:challenge). From the short cache below.
+    const live = new Set(Object.values(this.lobbyRooms).filter(r => r.challenge).map(r => r.challenge!.id));
+    for (const c of this.openCache) {
+      if (live.has(c.id) || new Date(c.expires_at).getTime() <= Date.now() || !asOfferedPrizeMode(c.prize_key)) continue;
+      list.push({
+        id: 'c' + c.id, name: c.name, open: true, locked: false, players: 0, prizeMode: c.prize_key,
+        challenge: { id: c.id, hostId: c.host_user_id, host: c.host_display_name, inMatch: false, dormant: true },
+      });
+    }
+    return list;
+  }
+
+  // This game's open challenges, read about 1 s after the list changes and
+  // every 15 s (flag on); the list is sent again only if they changed.
+  private openCache: OpenChallenge[] = [];
+  private openCacheTimer: ReturnType<typeof setTimeout> | null = null;
+  private refreshOpenCache() {
+    if (this.openCacheTimer) return;
+    this.openCacheTimer = setTimeout(async () => {
+      try {
+        const rows = await withTimeout(listOpenChallenges(200));
+        const key = (l: OpenChallenge[]) => JSON.stringify(l.map(c => [c.id, c.name, c.host_display_name, c.prize_key]));
+        const changed = key(rows) !== key(this.openCache);
+        this.openCache = rows;
+        if (changed) this.broadcast('room:list', { rooms: this.serializeList() });
+      } catch (e) {
+        console.error('[challenges] open-challenge list read failed (kept the last one):', e);
+      } finally {
+        this.openCacheTimer = null;
+      }
+    }, 1_000);
   }
 
   private pushChat(room: LobbyRoomData, msg: LobbyRoomData['chat'][number]) {
@@ -1345,6 +1390,7 @@ export class LobbyRoom extends Room {
 
   private broadcastList() {
     this.broadcast('room:list', { rooms: this.serializeList() });
+    if (challengesEnabled()) this.refreshOpenCache();
   }
 
   private sendToRoom(room: LobbyRoomData, event: string, data: any) {

@@ -211,6 +211,7 @@ body{background:radial-gradient(ellipse 70% 50% at 50% 0%,rgba(212,175,55,.14),t
   <div class="panel">
     <div class="panel-head">
       <span class="panel-title" id="rh-name">Room</span>
+      <button class="btn-leave" id="btn-cancel-challenge" style="display:none;margin-right:6px">Cancel challenge</button>
       <button class="btn-leave" id="btn-leave" style="display:none">Leave</button>
     </div>
 
@@ -433,7 +434,7 @@ document.getElementById('account-name').textContent = myName;
 function status(msg, type) { const el=document.getElementById('statusbar'); el.textContent=msg; el.className=type||''; }
 // The room list is always shown (left); these switch the right panel between
 // "no room yet" and the room you're in.
-function showList() { document.getElementById('room-empty').style.display='block'; document.getElementById('room-detail').style.display='none'; document.getElementById('btn-leave').style.display='none'; document.getElementById('rh-name').textContent='Room'; }
+function showList() { document.getElementById('room-empty').style.display='block'; document.getElementById('room-detail').style.display='none'; document.getElementById('btn-leave').style.display='none'; document.getElementById('btn-cancel-challenge').style.display='none'; document.getElementById('rh-name').textContent='Room'; }
 function showDetail() { document.getElementById('room-empty').style.display='none'; document.getElementById('room-detail').style.display='block'; document.getElementById('btn-leave').style.display='inline-block'; }
 
 
@@ -578,6 +579,7 @@ function renderRoomList(rooms) {
   else { heading.textContent='You can join '+rooms.length+' rooms!'; }
   rooms.forEach((r,i)=>{
     const tr=document.createElement('tr');
+    if(r.challenge){ tr.innerHTML=challengeRowHtml(r); tbody.appendChild(tr); return; }
     // A full room that holds our own seat (e.g. opened in another tab) can still be joined: it hands the seat back.
     const full=r.players>=2 && r.id!==remembered();
     tr.innerHTML=`
@@ -594,6 +596,28 @@ function renderRoomList(rooms) {
   });
 }
 
+// Open challenges in the list: a live challenge room, or one whose host is
+// away (dormant). Yours: Open + Cancel. Accepted by someone: "In match".
+// Anything else: Join — opened by id (room:challenge), the server claims it.
+function isMine(c){ return !!(footyAuth && c && Number(c.hostId)===Number(footyAuth.playerId)); }
+function challengeRowHtml(r){
+  const c=r.challenge, mine=isMine(c);
+  const badge=mine
+    ? ' <span style="color:#d4af37;font-size:10px;letter-spacing:.5px;vertical-align:middle;">YOURS</span>'
+    : ' <span style="color:#7fd1ae;font-size:10px;letter-spacing:.5px;vertical-align:middle;">CHALLENGE</span>';
+  const who=c.dormant?(mine?'Waiting for you':esc(c.host||'Host')+' · away'):(r.players+' player'+(r.players!==1?'s':''));
+  const btn=mine
+    ? `<button class="room-enter-btn" onclick="openChallenge(${Number(c.id)})">Open</button> <button class="room-enter-btn spectate" onclick="cancelChallenge()">Cancel</button>`
+    : c.inMatch
+      ? '<button class="room-enter-btn spectate" disabled>In match</button>'
+      : `<button class="room-enter-btn" onclick="openChallenge(${Number(c.id)})">Join</button>`;
+  return `<td class="room-name">${esc(r.name)}${badge}</td><td class="room-players">${who}</td><td class="room-enter">${prizeTagHtml(r.prizeMode)}${btn}</td>`;
+}
+function openChallenge(id){ openingChallenge=true; status('Opening the challenge…','ok'); socket.emit('room:challenge',{id}); }
+function cancelChallenge(){ if(confirm('Cancel your challenge? It comes off the boards for good.')) socket.emit('room:cancel-challenge'); }
+socket.on('room:challenge:cancelled', ()=>{ status('Challenge cancelled','ok'); socket.emit('room:list'); });
+document.getElementById('btn-cancel-challenge').onclick=cancelChallenge;
+
 // The last join attempt, so the prize pick (room open to both) can repeat it.
 let lastJoin = null;
 function joinRoom(id) {
@@ -603,6 +627,9 @@ function joinRoom(id) {
 
 function renderDetail(room) {
   document.getElementById('rh-name').textContent=room.name;
+  const myChallenge=isMine(room.challenge);
+  document.getElementById('btn-cancel-challenge').style.display=myChallenge?'inline-block':'none';
+  document.getElementById('btn-leave').textContent=myChallenge?'Leave (challenge stays open)':'Leave';
   document.getElementById('room-code-val').textContent=room.code;
   document.getElementById('room-code-wrap').style.display=(room.open===false)?'block':'none';
   document.getElementById('room-code-pass').style.display=(room.locked && myRoomPassword)?'block':'none';
