@@ -3,6 +3,7 @@ import { matchMaker } from "@colyseus/core";
 import express from "express";
 import path from "path";
 import { migrateSettledMatches } from "./settledMatches";
+import { migrateChallenges } from "./challenges";
 import { migratePushSubscriptions } from "./pushNotifications";
 import { migrateMatchPayments, webhookHandler } from "./entryPayments";
 import { LobbyRoom } from "./rooms/LobbyRoom";
@@ -79,6 +80,7 @@ export const server = defineServer({
         await migrateSettledMatches();
         await migratePushSubscriptions();
         await migrateMatchPayments();
+        await migrateChallenges();   // open challenges: tables only, nothing uses them yet
     }
 });
 
